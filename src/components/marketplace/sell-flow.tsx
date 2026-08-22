@@ -1,5 +1,6 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
+
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type {
@@ -17,25 +18,81 @@ import {
   idempotencyKey,
   parseUsdcInput,
 } from "./utils";
+import { analysisPhotosAreBound } from "./sell-flow-lifecycle";
+
 type Step = "photos" | "analysis" | "review" | "published";
+type PublishedListing = { listingId: string; title: string };
+type AnalysisFailure = { status: "failed"; error?: { message?: string } };
+
 const allowed = ["image/jpeg", "image/png", "image/webp"];
+const steps: Step[] = ["photos", "analysis", "review", "published"];
+
+function abortError(): DOMException {
+  return new DOMException("The operation was aborted", "AbortError");
+}
+
+function assertActive(signal: AbortSignal, mounted: React.RefObject<boolean>): void {
+  if (signal.aborted || !mounted.current) throw abortError();
+}
+
 export function SellFlow() {
-  const [step, setStep] = useState<Step>("photos"),
-    [files, setFiles] = useState<File[]>([]),
-    [previews, setPreviews] = useState<string[]>([]),
-    [message, setMessage] = useState(""),
-    [busy, setBusy] = useState(false),
-    [analysis, setAnalysis] = useState<AnalysisSuccess | null>(null),
-    [draft, setDraft] = useState<Draft | null>(null),
-    [price, setPrice] = useState(""),
-    [published, setPublished] = useState<{
-      listingId: string;
-      title: string;
-    } | null>(null);
-  const analysisKey = useRef(idempotencyKey("analysis")),
-    publicationKey = useRef(idempotencyKey("publication")),
-    cancelled = useRef(false);
-  useEffect(() => () => previews.forEach(URL.revokeObjectURL), [previews]);
+  const [step, setStep] = useState<Step>("photos");
+  const [files, setFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
+  const [uploadedMedia, setUploadedMedia] = useState<MediaReference[]>([]);
+  const [runId, setRunId] = useState<string | null>(null);
+  const [terminalFailed, setTerminalFailed] = useState(false);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [analysis, setAnalysis] = useState<AnalysisSuccess | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [price, setPrice] = useState("");
+  const [published, setPublished] = useState<PublishedListing | null>(null);
+
+  const analysisKey = useRef(idempotencyKey("analysis"));
+  const publicationKey = useRef(idempotencyKey("publication"));
+  const uploadedMediaRef = useRef<MediaReference[]>([]);
+  const runIdRef = useRef<string | null>(null);
+  const abortController = useRef<AbortController | null>(null);
+  const timeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mounted = useRef(true);
+  const heading = useRef<HTMLHeadingElement | null>(null);
+  const priceInput = useRef<HTMLInputElement | null>(null);
+  const previewsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    heading.current?.focus();
+  }, [step]);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      abortController.current?.abort();
+      if (timeout.current) clearTimeout(timeout.current);
+      previewsRef.current.forEach(URL.revokeObjectURL);
+    };
+  }, []);
+
+  function replacePreviews(next: string[]) {
+    previewsRef.current.forEach(URL.revokeObjectURL);
+    previewsRef.current = next;
+    setPreviews(next);
+  }
+
+  function resetAnalysisIdentity() {
+    analysisKey.current = idempotencyKey("analysis");
+    publicationKey.current = idempotencyKey("publication");
+    uploadedMediaRef.current = [];
+    runIdRef.current = null;
+    setUploadedMedia([]);
+    setRunId(null);
+    setTerminalFailed(false);
+    setAnalysis(null);
+    setDraft(null);
+    setPublished(null);
+  }
+
   function choose(list: FileList | null) {
     if (!list) return;
     const next = Array.from(list);
@@ -43,104 +100,201 @@ export function SellFlow() {
       setMessage("Choose 3 to 8 photos.");
       return;
     }
-    if (next.some((f) => !allowed.includes(f.type))) {
+    if (next.some((file) => !allowed.includes(file.type))) {
       setMessage("Use JPEG, PNG, or WebP photos.");
       return;
     }
-    if (next.some((f) => f.size > 8 * 1024 * 1024)) {
+    if (next.some((file) => file.size > 8 * 1024 * 1024)) {
       setMessage("Each photo must be 8 MB or smaller.");
       return;
     }
-    previews.forEach(URL.revokeObjectURL);
+
+    abortController.current?.abort();
+    resetAnalysisIdentity();
     setFiles(next);
-    setPreviews(next.map(URL.createObjectURL));
+    replacePreviews(next.map(URL.createObjectURL));
     setMessage("");
+    setStep("photos");
   }
-  async function start() {
+
+  function clearPhotos() {
+    abortController.current?.abort();
+    resetAnalysisIdentity();
+    setFiles([]);
+    replacePreviews([]);
+    setMessage("Photos cleared.");
+    setBusy(false);
+    setStep("photos");
+  }
+
+  function wait(milliseconds: number, signal: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const onAbort = () => {
+        if (timeout.current) clearTimeout(timeout.current);
+        timeout.current = null;
+        reject(abortError());
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      timeout.current = setTimeout(() => {
+        timeout.current = null;
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, milliseconds);
+    });
+  }
+
+  async function beginAnalysis() {
+    const controller = new AbortController();
+    abortController.current?.abort();
+    abortController.current = controller;
+    const { signal } = controller;
     setBusy(true);
     setMessage("");
-    cancelled.current = false;
+
     try {
-      const media: MediaReference[] = [];
-      for (const file of files) {
-        const r = await fetch("/api/media", {
-          method: "POST",
-          headers: { "Content-Type": file.type },
-          body: file,
-        });
-        if (!r.ok) throw new Error(friendlyError(r.status));
-        media.push(await r.json());
+      let media = uploadedMediaRef.current;
+      if (media.length === 0) {
+        const uploaded: MediaReference[] = [];
+        for (const file of files) {
+          const response = await fetch("/api/media", {
+            method: "POST",
+            headers: { "Content-Type": file.type },
+            body: file,
+            signal,
+          });
+          assertActive(signal, mounted);
+          if (!response.ok) throw new Error(friendlyError(response.status));
+          const reference = (await response.json()) as MediaReference;
+          assertActive(signal, mounted);
+          uploaded.push(reference);
+        }
+        media = uploaded;
+        uploadedMediaRef.current = uploaded;
+        assertActive(signal, mounted);
+        setUploadedMedia(uploaded);
       }
-      const started = await fetch("/api/analyze", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": analysisKey.current,
-        },
-        body: JSON.stringify({ media }),
-      });
-      if (!started.ok) throw new Error(friendlyError(started.status));
-      const { runId } = await started.json();
+
+      let currentRunId = runIdRef.current;
+      if (!currentRunId) {
+        const started = await fetch("/api/analyze", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Idempotency-Key": analysisKey.current,
+          },
+          body: JSON.stringify({ media }),
+          signal,
+        });
+        assertActive(signal, mounted);
+        if (!started.ok) throw new Error(friendlyError(started.status));
+        const accepted = (await started.json()) as { runId: string };
+        assertActive(signal, mounted);
+        currentRunId = accepted.runId;
+        runIdRef.current = currentRunId;
+        setRunId(currentRunId);
+      }
+
+      assertActive(signal, mounted);
       setStep("analysis");
-      let delay = 750;
-      for (let i = 0; i < 35 && !cancelled.current; i++) {
-        await new Promise((r) => setTimeout(r, delay));
-        const response = await fetch(
-          `/api/analyze/${encodeURIComponent(runId)}`,
-        );
+      let pollDelay = 750;
+      for (let attempt = 0; attempt < 35; attempt += 1) {
+        await wait(pollDelay, signal);
+        assertActive(signal, mounted);
+        const response = await fetch(`/api/analyze/${encodeURIComponent(currentRunId)}`, { signal });
+        assertActive(signal, mounted);
         if (!response.ok) throw new Error(friendlyError(response.status));
-        const state = await response.json();
+        const state = (await response.json()) as AnalysisSuccess | AnalysisFailure;
+        assertActive(signal, mounted);
+
         if (state.status === "succeeded") {
+          if (!analysisPhotosAreBound(state.photoIds, media, state.draft.evidence.map(({ photoId }) => photoId))) {
+            setTerminalFailed(true);
+            throw new Error("Analysis returned evidence for an unknown photo. Nothing can be published.");
+          }
+          assertActive(signal, mounted);
           setAnalysis(state);
           setDraft(state.draft);
-          setPrice(
-            formatUsdcAtomic(
-              state.priceRecommendation.recommendedPrice.atomicAmount,
-            ),
-          );
+          setPrice(formatUsdcAtomic(state.priceRecommendation.recommendedPrice.atomicAmount));
+          setTerminalFailed(false);
           setStep("review");
           return;
         }
-        if (state.status === "failed")
-          throw new Error(
-            "Analysis couldn’t complete. Your photos are still here—try again.",
-          );
-        delay = Math.min(3000, Math.round(delay * 1.35));
+        if (state.status === "failed") {
+          assertActive(signal, mounted);
+          setTerminalFailed(true);
+          setMessage(state.error?.message ?? "Analysis couldn’t complete. Start a new analysis when you’re ready.");
+          setStep("photos");
+          return;
+        }
+        pollDelay = Math.min(3000, Math.round(pollDelay * 1.35));
       }
-      if (!cancelled.current)
-        throw new Error(
-          "Analysis is taking longer than expected. Try again to check once more.",
-        );
-    } catch (e) {
-      setMessage(
-        e instanceof Error
-          ? e.message
-          : "Something went wrong. Please try again.",
-      );
+      throw new Error("Analysis is taking longer than expected. Retry to resume this same analysis.");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (!mounted.current || signal.aborted) return;
+      setMessage(error instanceof Error ? error.message : "Something went wrong. Please try again.");
       setStep("photos");
     } finally {
-      setBusy(false);
+      if (mounted.current && abortController.current === controller) {
+        abortController.current = null;
+        setBusy(false);
+      }
     }
   }
+
+  function startNewAnalysis() {
+    analysisKey.current = idempotencyKey("analysis");
+    publicationKey.current = idempotencyKey("publication");
+    runIdRef.current = null;
+    setRunId(null);
+    setTerminalFailed(false);
+    void beginAnalysis();
+  }
+
   function cancel() {
-    cancelled.current = true;
-    setStep("photos");
+    abortController.current?.abort();
+    abortController.current = null;
+    if (timeout.current) clearTimeout(timeout.current);
+    timeout.current = null;
     setBusy(false);
+    setStep("photos");
     setMessage("Analysis cancelled. Your photos are still selected.");
   }
+
   async function publish() {
     if (!analysis || !draft) return;
-    const atomic = parseUsdcInput(price);
-    if (!atomic) {
-      setMessage(
-        "Enter a price above zero with no more than six decimal places.",
-      );
+    const invalidField = document.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
+      "[data-review-form] input:invalid, [data-review-form] textarea:invalid, [data-review-form] select:invalid",
+    );
+    if (invalidField) {
+      invalidField.focus();
+      invalidField.reportValidity();
+      setMessage("Check the highlighted listing field before publishing.");
       return;
     }
+    const atomic = parseUsdcInput(price);
+    if (!atomic) {
+      priceInput.current?.focus();
+      setMessage("Enter a price above zero with no more than six decimal places.");
+      return;
+    }
+    if (!analysisPhotosAreBound(
+      analysis.photoIds,
+      uploadedMediaRef.current,
+      draft.evidence.map(({ photoId }) => photoId),
+    )) {
+      setMessage("Evidence references an unknown source photo. Nothing was published.");
+      return;
+    }
+
+    const controller = new AbortController();
+    abortController.current?.abort();
+    abortController.current = controller;
+    const { signal } = controller;
     setBusy(true);
     setMessage("");
     try {
-      const r = await fetch("/api/listings", {
+      const response = await fetch("/api/listings", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -149,64 +303,56 @@ export function SellFlow() {
         body: JSON.stringify({
           analysisRunId: analysis.runId,
           ...draft,
-          approvedPrice: {
-            currency: "USDC",
-            network: "eip155:84532",
-            atomicAmount: atomic,
-          },
+          approvedPrice: { currency: "USDC", network: "eip155:84532", atomicAmount: atomic },
         }),
+        signal,
       });
-      if (!r.ok) throw new Error(friendlyError(r.status));
-      const listing = await r.json();
+      assertActive(signal, mounted);
+      if (!response.ok) throw new Error(friendlyError(response.status));
+      const listing = (await response.json()) as PublishedListing;
+      assertActive(signal, mounted);
       setPublished(listing);
       setStep("published");
-    } catch (e) {
-      setMessage(
-        e instanceof Error
-          ? e.message
-          : "Publication failed. Please try again.",
-      );
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (!mounted.current || signal.aborted) return;
+      setMessage(error instanceof Error ? error.message : "Publication failed. Please try again.");
     } finally {
-      setBusy(false);
+      if (mounted.current && abortController.current === controller) {
+        abortController.current = null;
+        setBusy(false);
+      }
     }
   }
+
   return (
-    <main className="sell-page">
+    <main id="main-content" className="sell-page">
       <ol className="steps" aria-label="Listing progress">
-        {["Photos", "Analysis", "Review", "Published"].map((x, i) => (
-          <li
-            className={
-              i <= ["photos", "analysis", "review", "published"].indexOf(step)
-                ? "current"
-                : ""
-            }
-            key={x}
-          >
-            {x}
+        {["Photos", "Analysis", "Review", "Published"].map((label, index) => (
+          <li className={index <= steps.indexOf(step) ? "current" : ""} key={label}>
+            {label}
           </li>
         ))}
       </ol>
+
       {step === "photos" && (
         <section className="sell-section">
-          <h1>Sell an item</h1>
-          <p>
-            Start with 3–8 clear photos. Include every side, accessory, and
-            visible flaw.
-          </p>
+          <h1 ref={heading} tabIndex={-1} data-step-heading>Sell an item</h1>
+          <p>Start with 3–8 clear photos. Include every side, accessory, and visible flaw.</p>
           <label className="upload-zone">
-            <strong>Choose product photos</strong>
+            <strong>{files.length > 0 ? "Change product photos" : "Choose product photos"}</strong>
             <span>JPEG, PNG, or WebP · up to 8 MB each</span>
             <input
               type="file"
               accept="image/jpeg,image/png,image/webp"
               multiple
-              onChange={(e) => choose(e.target.files)}
+              onChange={(event) => choose(event.target.files)}
             />
           </label>
           {previews.length > 0 && (
             <div className="preview-grid">
-              {previews.map((src, i) => (
-                <img key={src} src={src} alt={`Selected photo ${i + 1}`} />
+              {previews.map((src, index) => (
+                <img key={src} src={src} alt={`Selected photo ${index + 1}`} />
               ))}
             </div>
           )}
@@ -214,201 +360,147 @@ export function SellFlow() {
             <button
               className="button primary"
               disabled={files.length < 3 || busy}
-              onClick={start}
+              onClick={terminalFailed ? startNewAnalysis : beginAnalysis}
             >
-              {busy ? "Uploading…" : "Analyze photos"}
+              {busy
+                ? uploadedMedia.length > 0 ? "Resuming…" : "Uploading…"
+                : terminalFailed ? "Start new analysis"
+                  : runId ? "Resume analysis" : "Analyze photos"}
             </button>
             {files.length > 0 && (
-              <button className="button" onClick={() => choose(null)}>
-                Keep selected
-              </button>
+              <button className="button" disabled={busy} onClick={clearPhotos}>Clear photos</button>
             )}
           </div>
         </section>
       )}
+
       {step === "analysis" && (
-        <section className="sell-section analysis-progress">
-          <div className="spinner" />
-          <h1>Building your listing</h1>
-          <p>
-            Reviewing the photos and comparing similar sold items. This can take
-            a minute.
-          </p>
-          <button className="button" onClick={cancel}>
-            Cancel
-          </button>
+        <section className="sell-section analysis-progress" role="status" aria-live="polite">
+          <div className="spinner" aria-hidden="true" />
+          <h1 ref={heading} tabIndex={-1} data-step-heading>Building your listing</h1>
+          <p>Reviewing the photos and comparing similar sold items. This can take a minute.</p>
+          <button className="button" onClick={cancel}>Cancel</button>
         </section>
       )}
+
       {step === "review" && draft && analysis && (
         <Review
+          headingRef={heading}
+          priceInputRef={priceInput}
           draft={draft}
           setDraft={setDraft}
           price={price}
           setPrice={setPrice}
           analysis={analysis}
+          previews={previews}
           publish={publish}
           busy={busy}
         />
-      )}{" "}
+      )}
+
       {step === "published" && published && (
         <section className="sell-section published">
-          <h1>Your listing is live</h1>
-          <p>
-            <strong>{published.title}</strong> is now visible in the
-            marketplace.
-          </p>
+          <h1 ref={heading} tabIndex={-1} data-step-heading>Your listing is live</h1>
+          <p><strong>{published.title}</strong> is now visible in the marketplace.</p>
           <div className="actions">
-            <Link
-              className="button primary"
-              href={`/listings/${published.listingId}`}
-            >
-              View listing
-            </Link>
-            <Link className="button" href="/">
-              Browse marketplace
-            </Link>
+            <Link className="button primary" href={`/listings/${published.listingId}`}>View listing</Link>
+            <Link className="button" href="/">Browse marketplace</Link>
           </div>
         </section>
       )}
-      {message && (
-        <p className="form-error" role="alert">
-          {message}
-        </p>
-      )}
+
+      <div className="form-status" role="status" aria-live="polite" aria-atomic="true">
+        {message && <p className="form-error">{message}</p>}
+      </div>
     </main>
   );
 }
+
 function Review({
+  headingRef,
+  priceInputRef,
   draft,
   setDraft,
   price,
   setPrice,
   analysis,
+  previews,
   publish,
   busy,
 }: {
+  headingRef: React.RefObject<HTMLHeadingElement | null>;
+  priceInputRef: React.RefObject<HTMLInputElement | null>;
   draft: Draft;
-  setDraft: (d: Draft) => void;
+  setDraft: (draft: Draft) => void;
   price: string;
-  setPrice: (s: string) => void;
+  setPrice: (price: string) => void;
   analysis: AnalysisSuccess;
+  previews: string[];
   publish: () => void;
   busy: boolean;
 }) {
-  const set = <K extends keyof Draft>(k: K, v: Draft[K]) =>
-    setDraft({ ...draft, [k]: v });
+  const [selectedPhotoId, setSelectedPhotoId] = useState(analysis.photoIds[0]);
+  const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft({ ...draft, [key]: value });
+  const photoIndex = new Map(analysis.photoIds.map((photoId, index) => [photoId, index]));
+
   return (
     <section className="review-layout">
-      <div className="editor">
-        <h1>Review your listing</h1>
+      <div className="editor" data-review-form>
+        <h1 ref={headingRef} tabIndex={-1} data-step-heading>Review your listing</h1>
         <p>Everything below can be edited before you publish.</p>
         <Field label="Title">
-          <input
-            value={draft.title}
-            minLength={5}
-            maxLength={80}
-            onChange={(e) => set("title", e.target.value)}
-          />
+          <input required value={draft.title} minLength={5} maxLength={80} onChange={(event) => set("title", event.target.value)} />
         </Field>
         <Field label="Description">
-          <textarea
-            rows={6}
-            value={draft.description}
-            minLength={20}
-            maxLength={3000}
-            onChange={(e) => set("description", e.target.value)}
-          />
+          <textarea required rows={6} value={draft.description} minLength={20} maxLength={3000} onChange={(event) => set("description", event.target.value)} />
         </Field>
         <div className="field-pair">
           <Field label="Category">
-            <select
-              value={draft.category}
-              onChange={(e) => set("category", e.target.value as Category)}
-            >
+            <select value={draft.category} onChange={(event) => set("category", event.target.value as Category)}>
               <option value="electronics">Electronics</option>
               <option value="running_shoes">Running shoes</option>
               <option value="sneakers">Sneakers</option>
             </select>
           </Field>
           <Field label="Condition">
-            <select
-              value={draft.condition}
-              onChange={(e) => set("condition", e.target.value as Condition)}
-            >
-              {[
-                "new",
-                "like_new",
-                "very_good",
-                "good",
-                "acceptable",
-                "for_parts",
-              ].map((x) => (
-                <option key={x} value={x}>
-                  {x.replaceAll("_", " ")}
-                </option>
+            <select value={draft.condition} onChange={(event) => set("condition", event.target.value as Condition)}>
+              {["new", "like_new", "very_good", "good", "acceptable", "for_parts"].map((condition) => (
+                <option key={condition} value={condition}>{condition.replaceAll("_", " ")}</option>
               ))}
             </select>
           </Field>
         </div>
         <div className="field-pair">
           <Field label="Brand">
-            <input
-              value={draft.brand}
-              onChange={(e) => set("brand", e.target.value)}
-            />
+            <input required value={draft.brand} onChange={(event) => set("brand", event.target.value)} />
           </Field>
           <Field label="Model">
-            <input
-              value={draft.model}
-              onChange={(e) => set("model", e.target.value)}
-            />
+            <input required value={draft.model} onChange={(event) => set("model", event.target.value)} />
           </Field>
         </div>
         <Field label="Included accessories (one per line)">
-          <textarea
-            rows={3}
-            value={draft.includedAccessories.join("\n")}
-            onChange={(e) => set("includedAccessories", lines(e.target.value))}
-          />
+          <textarea rows={3} value={draft.includedAccessories.join("\n")} onChange={(event) => set("includedAccessories", lines(event.target.value))} />
         </Field>
         <Field label="Visibly missing (one per line)">
-          <textarea
-            rows={3}
-            value={draft.visiblyMissingAccessories.join("\n")}
-            onChange={(e) =>
-              set("visiblyMissingAccessories", lines(e.target.value))
-            }
-          />
+          <textarea rows={3} value={draft.visiblyMissingAccessories.join("\n")} onChange={(event) => set("visiblyMissingAccessories", lines(event.target.value))} />
         </Field>
         <h2>Attributes</h2>
-        {Object.entries(draft.attributes).map(([k, v]) => (
-          <Field key={k} label={k}>
-            <input
-              value={v}
-              onChange={(e) =>
-                set("attributes", { ...draft.attributes, [k]: e.target.value })
-              }
-            />
+        {Object.entries(draft.attributes).map(([key, value]) => (
+          <Field key={key} label={key}>
+            <input value={value} onChange={(event) => set("attributes", { ...draft.attributes, [key]: event.target.value })} />
           </Field>
         ))}
         {draft.assumptions.length > 0 && (
           <>
             <h2>Unverified assumptions</h2>
             <p>Check and edit these details—they were not directly visible.</p>
-            {draft.assumptions.map((a, i) => (
-              <Field
-                key={a.id}
-                label={`${a.field} · ${a.confidence} confidence`}
-              >
+            {draft.assumptions.map((assumption, index) => (
+              <Field key={assumption.id} label={`${assumption.field} · ${assumption.confidence} confidence`}>
                 <input
-                  value={a.value}
-                  onChange={(e) => {
+                  value={assumption.value}
+                  onChange={(event) => {
                     const assumptions = [...draft.assumptions];
-                    assumptions[i] = {
-                      ...a,
-                      value: e.target.value,
-                      sellerEdited: true,
-                    } as Assumption;
+                    assumptions[index] = { ...assumption, value: event.target.value, sellerEdited: true } as Assumption;
                     set("assumptions", assumptions);
                   }}
                 />
@@ -417,72 +509,83 @@ function Review({
           </>
         )}
       </div>
+
       <aside className="review-aside">
         <h2>Price recommendation</h2>
         <p className="range">
-          {displayPrice(analysis.priceRecommendation.minimumPrice)}–
-          {displayPrice(analysis.priceRecommendation.maximumPrice)}
+          {displayPrice(analysis.priceRecommendation.minimumPrice)}–{displayPrice(analysis.priceRecommendation.maximumPrice)}
         </p>
         <p>{analysis.priceRecommendation.rationale}</p>
         <Field label="Your final price (USDC)">
           <input
+            ref={priceInputRef}
             inputMode="decimal"
             value={price}
-            onChange={(e) => setPrice(e.target.value)}
+            onChange={(event) => setPrice(event.target.value)}
             aria-describedby="price-help"
           />
         </Field>
-        <small id="price-help">
-          The recommendation is guidance. You choose the final exact price.
-        </small>
+        <small id="price-help">The recommendation is guidance. You choose the final exact price.</small>
+
         <h2>Comparable sales</h2>
-        {analysis.priceRecommendation.comparables.map((c) => (
-          <div className="comparable" key={c.comparableId}>
-            <strong>{c.title}</strong>
-            <span>{displayPrice(c.soldPrice)}</span>
-            <p>{c.similarityReason}</p>
+        {analysis.priceRecommendation.comparables.map((comparable) => (
+          <div className="comparable" key={comparable.comparableId}>
+            <strong>{comparable.title}</strong>
+            <span>{displayPrice(comparable.soldPrice)}</span>
+            <p>{comparable.similarityReason}</p>
           </div>
         ))}
+
         <h2>Photo evidence</h2>
-        {draft.evidence.map((e) => (
-          <div className="evidence-readonly" key={e.id}>
-            <strong>{e.claim}</strong>
-            <span>
-              Photo {analysis.status === "succeeded" ? "source locked" : ""} ·{" "}
-              {e.confidence}
-            </span>
-          </div>
-        ))}
-        <button
-          className="button primary publish"
-          disabled={busy || !parseUsdcInput(price)}
-          onClick={publish}
-        >
+        <div className="evidence-source" aria-live="polite">
+          {analysis.photoIds.map((photoId, index) => (
+            <button
+              type="button"
+              key={photoId}
+              className={selectedPhotoId === photoId ? "selected" : ""}
+              aria-label={`Source photo ${index + 1}`}
+              aria-pressed={selectedPhotoId === photoId}
+              onClick={() => setSelectedPhotoId(photoId)}
+            >
+              <img src={previews[index]} alt="" />
+              <span>Photo {index + 1}</span>
+            </button>
+          ))}
+        </div>
+        {draft.evidence.map((evidence) => {
+          const index = photoIndex.get(evidence.photoId);
+          if (index === undefined) return null;
+          const selected = selectedPhotoId === evidence.photoId;
+          return (
+            <button
+              type="button"
+              className={`evidence-readonly ${selected ? "selected" : ""}`}
+              key={evidence.id}
+              aria-pressed={selected}
+              onClick={() => setSelectedPhotoId(evidence.photoId)}
+            >
+              <img src={previews[index]} alt={`Source photo ${index + 1}`} />
+              <span>
+                <strong>{evidence.claim}</strong>
+                <small>Photo {index + 1} · {evidence.confidence} confidence · source locked</small>
+              </span>
+            </button>
+          );
+        })}
+
+        <button className="button primary publish" disabled={busy} onClick={publish}>
           {busy ? "Publishing…" : "Publish listing"}
         </button>
-        <p className="publish-note">
-          Nothing is published until you press this button.
+        <p className="publish-note" role="status" aria-live="polite">
+          {busy ? "Publishing your approved listing…" : "Nothing is published until you press this button."}
         </p>
       </aside>
     </section>
   );
 }
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      {children}
-    </label>
-  );
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label className="field"><span>{label}</span>{children}</label>;
 }
-const lines = (s: string) =>
-  s
-    .split("\n")
-    .map((x) => x.trim())
-    .filter(Boolean);
+
+const lines = (value: string) => value.split("\n").map((line) => line.trim()).filter(Boolean);

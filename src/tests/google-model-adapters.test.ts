@@ -4,6 +4,8 @@ import { GeminiListingDraftGenerator, GEMINI_LISTING_INSTRUCTIONS } from "../lib
 import { GemmaPriceRecommendationGenerator, GEMMA_PRICING_INSTRUCTIONS } from "../lib/analysis/gemma-price-adapter";
 import {
   createGoogleStructuredGeneration,
+  GOOGLE_GENERATION_TIMEOUT_MS,
+  GOOGLE_MAX_OUTPUT_TOKENS,
   type StructuredGeneration,
   type StructuredGenerationRequest,
 } from "../lib/analysis/google-structured-generation";
@@ -89,7 +91,15 @@ describe("live Google model adapters", () => {
     expect(result).toEqual({ ok: true });
     expect(createProvider).toHaveBeenCalledWith({ apiKey: "test-google-key" });
     expect(provider).toHaveBeenCalledWith(GEMINI_LISTING_MODEL_ID);
-    expect(generate).toHaveBeenCalledWith(expect.objectContaining({ model, maxRetries: 0, messages: [] }));
+    expect(generate).toHaveBeenCalledWith(expect.objectContaining({
+      model,
+      maxRetries: 0,
+      maxOutputTokens: GOOGLE_MAX_OUTPUT_TOKENS,
+      messages: [],
+    }));
     expect(generate.mock.calls[0][0]).toHaveProperty("output");
+    const abortSignal = (generate.mock.calls[0][0] as { abortSignal?: AbortSignal }).abortSignal;
+    expect(abortSignal).toBeInstanceOf(AbortSignal);
+    expect(GOOGLE_GENERATION_TIMEOUT_MS).toBe(90_000);
   });
 });

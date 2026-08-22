@@ -22,6 +22,9 @@ interface GoogleGenerationDependencies {
   generate: typeof generateText;
 }
 
+export const GOOGLE_GENERATION_TIMEOUT_MS = 90_000;
+export const GOOGLE_MAX_OUTPUT_TOKENS = 2_048;
+
 export function createGoogleStructuredGeneration(
   dependencies: GoogleGenerationDependencies = {
     createProvider: createGoogleGenerativeAI,
@@ -35,6 +38,8 @@ export function createGoogleStructuredGeneration(
       messages,
       output: Output.object({ schema }),
       maxRetries: 0,
+      maxOutputTokens: GOOGLE_MAX_OUTPUT_TOKENS,
+      abortSignal: AbortSignal.timeout(GOOGLE_GENERATION_TIMEOUT_MS),
     });
     return result.output as T;
   };

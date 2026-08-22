@@ -147,6 +147,12 @@ function isProviderNotFound(error: unknown): boolean {
 
 function isProviderConflict(error: unknown): boolean {
   if (error instanceof BlobPreconditionFailedError) return true;
+  if (
+    error instanceof Error &&
+    error.message.startsWith("Vercel Blob: This blob already exists,")
+  ) {
+    return true;
+  }
   const candidate = ProviderErrorShapeSchema.safeParse(error);
   if (!candidate.success) return false;
   return (

@@ -330,6 +330,13 @@ describe("VercelBlobMarketplaceRepository", () => {
     expect(conflict).toBeInstanceOf(RepositoryConflictError);
     expect(errorMessage(conflict)).not.toContain("secret");
 
+    transport.nextPutError = new Error(
+      "Vercel Blob: This blob already exists, use `allowOverwrite: true` if you want to overwrite it."
+    );
+    await expect(repository.publishSellerListing(activeListing)).rejects.toBeInstanceOf(
+      RepositoryConflictError
+    );
+
     await expect(repository.getListing("missing-listing")).rejects.toBeInstanceOf(RepositoryNotFoundError);
     transport.nextGetError = { status: 503, message: "token=secret" };
     const unavailable = await repository.getListing("missing-listing").catch((error: unknown) => error);

@@ -27,3 +27,15 @@ export function selectDifferentFiles(newKey: string): AnalysisLifecycle {
 export function startNewAnalysis(state: AnalysisLifecycle, newKey: string): AnalysisLifecycle {
   return { ...state, analysisKey: newKey, runId: null, terminalFailed: false };
 }
+
+export function analysisPhotosAreBound(
+  photoIds: readonly string[],
+  media: readonly MediaReference[],
+  evidencePhotoIds: readonly string[],
+): boolean {
+  if (photoIds.length !== media.length || photoIds.some((photoId, index) => photoId !== media[index]?.id)) {
+    return false;
+  }
+  const knownIds = new Set(photoIds);
+  return evidencePhotoIds.every((photoId) => knownIds.has(photoId));
+}
