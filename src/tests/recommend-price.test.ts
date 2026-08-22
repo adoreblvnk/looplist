@@ -129,6 +129,24 @@ describe("Gemma comparable pricing core", () => {
     expect((await repository.listSoldComparables())[0].title).toBe(corpus.title);
   });
 
+  it("hydrates seller-facing copy from canonical money without internal tokens", async () => {
+    const repository = new InMemoryMarketplaceRepository({ soldComparables: [comparable] });
+    const output = priceCandidate();
+    output.rationale = `Use ${comparable.comparableId}: 800000000–900000000 USDC, with 850000000 USDC recommended for like_new.`;
+    output.comparables[0].similarityReason = `${comparable.comparableId} is like_new and sold for 850,000,000 USDC.`;
+
+    const result = await recommendPrice(repository, { generate: async () => output }, validDraft);
+    const sellerCopy = [result.rationale, ...result.comparables.map((item) => item.similarityReason)].join(" ");
+
+    expect(result.rationale).toContain(comparable.title);
+    expect(result.rationale).toContain("800–900 USDC");
+    expect(result.rationale).toContain("850 USDC");
+    expect(result.comparables[0].similarityReason).toContain("Like new");
+    expect(sellerCopy).not.toContain(comparable.comparableId);
+    expect(sellerCopy).not.toContain("like_new");
+    expect(sellerCopy).not.toMatch(/(?:800|850|900)[,.]?000[,.]?000/);
+  });
+
   it("rejects candidates that echo facts or include unknown or duplicate selected IDs", async () => {
     expect(GemmaPriceCandidateSchema.safeParse({
       ...priceCandidate(),

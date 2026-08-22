@@ -10,6 +10,11 @@ import {
   type StructuredGenerationRequest,
 } from "../lib/analysis/google-structured-generation";
 import { GEMINI_LISTING_MODEL_ID, GEMMA_PRICING_MODEL_ID } from "../lib/analysis/google-models";
+import {
+  GEMMA_BUYER_SEARCH_SETTINGS,
+  GemmaBuyerSearchGenerationSchema,
+  GemmaBuyerSearchGenerator,
+} from "../lib/analysis/gemma-buyer-search-adapter";
 import { pricingDraftProjection } from "../lib/analysis/recommend-price";
 import { validDraft, comparable } from "./domain-fixtures";
 
@@ -83,6 +88,80 @@ describe("live Google model adapters", () => {
     for (const key of ["recommendedAtomicAmount", "minimumAtomicAmount", "maximumAtomicAmount", "comparables", "strongestComparableIds", "rationale"]) {
       expect(GEMMA_PRICING_INSTRUCTIONS).toContain(key);
     }
+  });
+
+  it("uses the bounded Gemma provider configuration for buyer ranking", async () => {
+    let captured: StructuredGenerationRequest<unknown> | undefined;
+    const generate: StructuredGeneration = async <T>(request: StructuredGenerationRequest<T>) => {
+      captured = request;
+      return {} as T;
+    };
+
+    await new GemmaBuyerSearchGenerator(generate).generate({
+      query: "Find a MacBook below 900 USDC",
+      listings: [],
+    });
+
+    expect(captured?.modelId).toBe(GEMMA_PRICING_MODEL_ID);
+    expect(captured?.settings).toEqual(GEMMA_BUYER_SEARCH_SETTINGS);
+    expect(captured?.settings?.providerOptions?.google).toEqual({
+      structuredOutputs: false,
+      thinkingConfig: { thinkingLevel: "minimal" },
+    });
+    const buyerPrompt = String(captured?.messages[0].content);
+    for (const key of [
+      "interpretedConstraints", "categories", "maximumAtomicAmount", "acceptableConditions",
+      "requiredTerms", "excludedDefectTerms", "matches", "listingId", "score",
+      "fitExplanation", "evidenceIds", "assumptionIds",
+    ]) {
+      expect(buyerPrompt).toContain(key);
+    }
+    expect(buyerPrompt).toContain("at most three");
+    expect(buyerPrompt).toContain("900000000 for 900 USDC");
+    expect(buyerPrompt).not.toContain("six-decimal USDC atomic strings");
+  });
+
+  it("retries one transient Gemma buyer-ranking failure and then succeeds", async () => {
+    const transient = Object.assign(new Error("Service Unavailable"), { statusCode: 503 });
+    const generate = vi.fn()
+      .mockRejectedValueOnce(transient)
+      .mockResolvedValueOnce({ matches: [] });
+
+    await expect(new GemmaBuyerSearchGenerator(generate).generate({
+      query: "Find running shoes",
+      listings: [],
+    })).resolves.toEqual({ matches: [] });
+    expect(generate).toHaveBeenCalledTimes(2);
+  });
+
+  it("normalizes only Gemma's observed single-object array wrapper before strict validation", () => {
+    const candidate = {
+      interpretedConstraints: {
+        categories: ["electronics"],
+        maximumAtomicAmount: "900000000",
+        acceptableConditions: ["acceptable"],
+        requiredTerms: ["MacBook"],
+        excludedDefectTerms: ["screen damage"],
+      },
+      matches: [],
+    };
+    expect(GemmaBuyerSearchGenerationSchema.parse([candidate])).toEqual(candidate);
+    expect(GemmaBuyerSearchGenerationSchema.safeParse([candidate, candidate]).success).toBe(false);
+    expect(GemmaBuyerSearchGenerationSchema.safeParse([{ ...candidate, extra: true }]).success).toBe(false);
+  });
+
+  it("does not retry non-transient or repeatedly failing Gemma buyer ranking", async () => {
+    const badRequest = Object.assign(new Error("Bad Request"), { status: 400 });
+    const invalidGenerate = vi.fn().mockRejectedValue(badRequest);
+    await expect(new GemmaBuyerSearchGenerator(invalidGenerate).generate({ query: "Find shoes", listings: [] }))
+      .rejects.toBe(badRequest);
+    expect(invalidGenerate).toHaveBeenCalledTimes(1);
+
+    const unavailable = Object.assign(new Error("Bad Gateway"), { status: 502 });
+    const unavailableGenerate = vi.fn().mockRejectedValue(unavailable);
+    await expect(new GemmaBuyerSearchGenerator(unavailableGenerate).generate({ query: "Find shoes", listings: [] }))
+      .rejects.toBe(unavailable);
+    expect(unavailableGenerate).toHaveBeenCalledTimes(2);
   });
 
   it("uses the direct provider, exact model identity, object output, and zero AI SDK retries", async () => {

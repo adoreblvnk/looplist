@@ -12,7 +12,7 @@ import type {
   MediaReference,
 } from "./types";
 import {
-  displayPrice,
+  displayListingPrice,
   formatUsdcAtomic,
   friendlyError,
   idempotencyKey,
@@ -329,7 +329,11 @@ export function SellFlow() {
     <main id="main-content" className="sell-page">
       <ol className="steps" aria-label="Listing progress">
         {["Photos", "Analysis", "Review", "Published"].map((label, index) => (
-          <li className={index <= steps.indexOf(step) ? "current" : ""} key={label}>
+          <li
+            className={index < steps.indexOf(step) ? "completed" : index === steps.indexOf(step) ? "current" : ""}
+            aria-current={index === steps.indexOf(step) ? "step" : undefined}
+            key={label}
+          >
             {label}
           </li>
         ))}
@@ -446,8 +450,13 @@ function Review({
   return (
     <section className="review-layout">
       <div className="editor" data-review-form>
-        <h1 ref={headingRef} tabIndex={-1} data-step-heading>Review your listing</h1>
-        <p>Everything below can be edited before you publish.</p>
+        <div className="review-product-lead">
+          <img src={previews[photoIndex.get(selectedPhotoId) ?? 0]} alt={`${draft.title}, selected product photo`} />
+          <div>
+            <h1 ref={headingRef} tabIndex={-1} data-step-heading>Review your listing</h1>
+            <p>Everything below can be edited before you publish.</p>
+          </div>
+        </div>
         <Field label="Title">
           <input required value={draft.title} minLength={5} maxLength={80} onChange={(event) => set("title", event.target.value)} />
         </Field>
@@ -513,7 +522,7 @@ function Review({
       <aside className="review-aside">
         <h2>Price recommendation</h2>
         <p className="range">
-          {displayPrice(analysis.priceRecommendation.minimumPrice)}–{displayPrice(analysis.priceRecommendation.maximumPrice)}
+          {displayListingPrice(analysis.priceRecommendation.minimumPrice)}–{displayListingPrice(analysis.priceRecommendation.maximumPrice)}
         </p>
         <p>{analysis.priceRecommendation.rationale}</p>
         <Field label="Your final price (USDC)">
@@ -531,7 +540,7 @@ function Review({
         {analysis.priceRecommendation.comparables.map((comparable) => (
           <div className="comparable" key={comparable.comparableId}>
             <strong>{comparable.title}</strong>
-            <span>{displayPrice(comparable.soldPrice)}</span>
+            <span>{displayListingPrice(comparable.soldPrice)}</span>
             <p>{comparable.similarityReason}</p>
           </div>
         ))}

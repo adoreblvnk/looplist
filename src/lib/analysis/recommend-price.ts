@@ -15,6 +15,7 @@ import {
   type PricingDraftProjection,
 } from "./contracts";
 import { AnalysisCoreError } from "./generate-listing-draft";
+import { formatUsdcAmount } from "../domain/usdc";
 
 /** Maximum serialized UTF-8 bytes passed to the Gemma pricing adapter. */
 export const MAX_GEMMA_PRICING_INPUT_BYTES = 64 * 1024;
@@ -38,6 +39,46 @@ function pricingComparable(comparable: SoldComparable): PricingComparable {
     soldPrice: structuredClone(comparable.soldPrice),
     soldAt: comparable.soldAt,
   };
+}
+
+function shopperPrice(atomicAmount: string): string {
+  return formatUsdcAmount(atomicAmount)
+    .replace(/\.0{6}$/, "")
+    .replace(/(\.\d*?[1-9])0+$/, "$1");
+}
+
+function humanizeToken(value: string): string {
+  const spaced = value.replaceAll("_", " ");
+  return `${spaced.charAt(0).toUpperCase()}${spaced.slice(1)}`;
+}
+
+function groupAtomicDigits(value: string): string {
+  return value.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function sanitizeComparableReason(
+  reason: string,
+  prepared: PreparedPriceRecommendation,
+  atomicAmounts: string[]
+): string {
+  let safe = reason;
+  for (const comparable of prepared.corpusById.values()) {
+    safe = safe.replace(new RegExp(escapeRegExp(comparable.comparableId), "gi"), comparable.title);
+  }
+  safe = safe.replace(/\b(?:sold[-_])?comparable[-_][a-z0-9_-]+\b/gi, "selected comparable");
+  for (const token of ["running_shoes", "like_new", "very_good", "for_parts"]) {
+    safe = safe.replace(new RegExp(`\\b${token}\\b`, "gi"), humanizeToken(token));
+  }
+  for (const atomic of [...new Set(atomicAmounts)].sort((left, right) => right.length - left.length)) {
+    const display = shopperPrice(atomic);
+    safe = safe.replaceAll(atomic, display);
+    safe = safe.replaceAll(groupAtomicDigits(atomic), display);
+  }
+  return safe;
 }
 
 export function pricingDraftProjection(input: ListingDraft): PricingDraftProjection {
@@ -106,6 +147,12 @@ export function hydratePriceRecommendation(
   output: unknown
 ): PriceRecommendation {
   const candidate = GemmaPriceCandidateSchema.parse(output);
+  const atomicAmounts = [
+    candidate.minimumAtomicAmount,
+    candidate.recommendedAtomicAmount,
+    candidate.maximumAtomicAmount,
+    ...[...prepared.corpusById.values()].map((comparable) => comparable.soldPrice.atomicAmount),
+  ];
   const selectedIds = new Set<string>();
   const comparables = candidate.comparables.map((selection) => {
     if (selectedIds.has(selection.comparableId)) {
@@ -125,9 +172,14 @@ export function hydratePriceRecommendation(
     return SoldComparableSchema.parse({
       ...structuredClone(authoritative),
       similarityScore: selection.similarityScore,
-      similarityReason: selection.similarityReason,
+      similarityReason: sanitizeComparableReason(selection.similarityReason, prepared, atomicAmounts),
     });
   });
+
+  const strongestTitles = candidate.strongestComparableIds
+    .map((id) => prepared.corpusById.get(id)?.title)
+    .filter((title): title is string => Boolean(title));
+  const rationale = `Gemma selected ${strongestTitles.join(", ")} as ${strongestTitles.length === 1 ? "the strongest sold comparison" : "the strongest sold comparisons"}. The recommended range is ${shopperPrice(candidate.minimumAtomicAmount)}–${shopperPrice(candidate.maximumAtomicAmount)} USDC, with a recommended price of ${shopperPrice(candidate.recommendedAtomicAmount)} USDC.`;
 
   return PriceRecommendationSchema.parse({
     recommendedPrice: fixedMoney(candidate.recommendedAtomicAmount),
@@ -135,7 +187,7 @@ export function hydratePriceRecommendation(
     maximumPrice: fixedMoney(candidate.maximumAtomicAmount),
     comparables,
     strongestComparableIds: structuredClone(candidate.strongestComparableIds),
-    rationale: candidate.rationale,
+    rationale,
   });
 }
 

@@ -1,4 +1,5 @@
 import "server-only";
+import { NoObjectGeneratedError } from "ai";
 import { ZodError } from "zod";
 import { GemmaBuyerSearchGenerator } from "../analysis/gemma-buyer-search-adapter";
 import {
@@ -108,6 +109,18 @@ function isTimeout(error: unknown): boolean {
   );
 }
 
+async function generateBuyerSearch(
+  services: BuyerSearchApiServices,
+  input: { searchId: string; query: string; generatedAt: string }
+): Promise<HydratedBuyerSearch> {
+  try {
+    return await searchMarketplace(services.repository, services.generator, input);
+  } catch (error) {
+    if (!(error instanceof BuyerSearchError) && !NoObjectGeneratedError.isInstance(error)) throw error;
+    return searchMarketplace(services.repository, services.generator, input);
+  }
+}
+
 export function createBuyerSearchPostHandler(
   servicesFactory: () => BuyerSearchApiServices = productionServices
 ) {
@@ -151,7 +164,7 @@ export function createBuyerSearchPostHandler(
         if (!(error instanceof RepositoryNotFoundError)) throw error;
       }
 
-      const generated = await searchMarketplace(services.repository, services.generator, {
+      const generated = await generateBuyerSearch(services, {
         searchId,
         query: claim.query,
         generatedAt: services.clock(),
@@ -167,6 +180,9 @@ export function createBuyerSearchPostHandler(
       }
     } catch (error) {
       if (isTimeout(error)) return failure(504, "buyer_search_timeout", "Buyer search timed out. Please retry.");
+      if (NoObjectGeneratedError.isInstance(error)) {
+        return failure(502, "buyer_search_model_output_invalid", "Gemma did not return a valid ranked-search response. Please retry.");
+      }
       if (error instanceof BuyerSearchError) {
         const status = error.code === "unknown_or_unavailable_listing" ? 409 : 502;
         return failure(status, "buyer_search_invalid", "Buyer search could not return a grounded active listing result");

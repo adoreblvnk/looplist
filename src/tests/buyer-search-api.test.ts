@@ -96,6 +96,23 @@ describe("buyer search API", () => {
     expect(retry.status).toBe(201);
   });
 
+  it("retries one invalid Gemma selection inside the same durable claim", async () => {
+    const repository = new InMemoryMarketplaceRepository({ listings: [activeListing] });
+    const generator: BuyerSearchGenerator = {
+      generate: vi.fn()
+        .mockResolvedValueOnce({ invalid: "shape" })
+        .mockResolvedValueOnce(output()),
+    };
+    const dependencies = services(repository, generator);
+    const handler = createBuyerSearchPostHandler(() => dependencies);
+
+    const response = await handler(request(QUERY, "buyer-search-key-bounded-retry"));
+    expect(response.status).toBe(201);
+    expect(generator.generate).toHaveBeenCalledTimes(2);
+    expect((await handler(request(QUERY, "buyer-search-key-bounded-retry"))).status).toBe(200);
+    expect(generator.generate).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     ["x", "application/json", 400],
     [QUERY, "text/plain", 415],
@@ -111,5 +128,6 @@ describe("buyer search API", () => {
     const body = await response.text();
     expect(body).toContain("buyer_search_invalid");
     expect(body).not.toContain("do-not-leak");
+    expect(generator.generate).toHaveBeenCalledTimes(2);
   });
 });
