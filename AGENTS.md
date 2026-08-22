@@ -10,4 +10,4 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 # LoopList
 
-Read `PROJECT_CONTEXT.md` before implementation. Keep one polished two-minute vertical slice. Use AI SDK 7 and Gemini, not ADK. Persist workflow state through Vercel Workflows, images and verified skills through Vercel Blob, and listings through eBay Sandbox. Do not add login, billing, dashboards, Carousell automation, or unrelated product features.
+Read `PROJECT_CONTEXT.md` before implementation. It is the sole product source of truth. Keep one polished two-minute vertical slice. Use AI SDK 7 with Gemini and Gemma through the Google Generative AI API, not ADK. Use Vercel Workflows, private Vercel Blob storage, and x402 on Base Sepolia as specified there. Do not preserve compatibility with the previous eBay-oriented prototype or add features outside the documented scope.
