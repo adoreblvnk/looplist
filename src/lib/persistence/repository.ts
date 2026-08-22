@@ -1,5 +1,11 @@
 import { z } from "zod";
 import {
+  BuyerSearchClaimSchema,
+  BuyerSearchSelectionRecordSchema,
+  type BuyerSearchClaim,
+  type BuyerSearchSelectionRecord,
+} from "../domain/buyer-search";
+import {
   ActiveListingSchema,
   AnalysisRunStateSchema,
   ListingDraftSchema,
@@ -180,6 +186,10 @@ export interface MarketplaceRepository {
   readAnalysisStartConfirmation(runId: string): Promise<AnalysisStartConfirmation>;
   createPublicationRequest(request: PublicationRequestRecord): Promise<PublicationRequestRecord>;
   readPublicationRequest(runId: string): Promise<PublicationRequestRecord>;
+  createBuyerSearchClaim(claim: BuyerSearchClaim): Promise<BuyerSearchClaim>;
+  readBuyerSearchClaim(searchId: string): Promise<BuyerSearchClaim>;
+  createBuyerSearchSelection(selection: BuyerSearchSelectionRecord): Promise<BuyerSearchSelectionRecord>;
+  readBuyerSearchSelection(searchId: string): Promise<BuyerSearchSelectionRecord>;
   publishSellerListing(listing: ActiveListing): Promise<MarketplaceListing>;
   createSeedListing(listing: ActiveListing): Promise<MarketplaceListing>;
   getListing(listingId: string): Promise<MarketplaceListing>;
@@ -220,6 +230,12 @@ export function parseSoldComparable(value: unknown): SoldComparable {
 }
 export function parseReconciliationFailure(value: unknown): ReconciliationFailure {
   return ReconciliationFailureSchema.parse(value);
+}
+export function parseBuyerSearchClaim(value: unknown): BuyerSearchClaim {
+  return BuyerSearchClaimSchema.parse(value);
+}
+export function parseBuyerSearchSelection(value: unknown): BuyerSearchSelectionRecord {
+  return BuyerSearchSelectionRecordSchema.parse(value);
 }
 export function parseMediaReference(value: unknown): MediaReference {
   return MediaReferenceSchema.parse(value);

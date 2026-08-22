@@ -9,6 +9,12 @@ import {
 } from "@vercel/blob";
 import { z } from "zod";
 import {
+  BuyerSearchClaimSchema,
+  BuyerSearchSelectionRecordSchema,
+  type BuyerSearchClaim,
+  type BuyerSearchSelectionRecord,
+} from "../domain/buyer-search";
+import {
   ActiveListingSchema,
   MediaReferenceSchema,
   ReconciliationFailureSchema,
@@ -25,6 +31,8 @@ import {
   DurableRunPathSchema,
   analysisStartClaimPath,
   analysisStartConfirmationPath,
+  buyerSearchClaimPath,
+  buyerSearchSelectionPath,
   publicationRequestPath,
   PublishedListingPathSchema,
   SoldComparablePathSchema,
@@ -277,6 +285,34 @@ export class VercelBlobMarketplaceRepository implements MarketplaceRepository {
     const request = await this.readJson(publicationRequestPath(runId), PublicationRequestRecordSchema);
     if (request.runId !== runId) throw new RepositoryDataError("Stored publication request does not match its path");
     return request;
+  }
+
+  async createBuyerSearchClaim(candidate: BuyerSearchClaim): Promise<BuyerSearchClaim> {
+    const claim = BuyerSearchClaimSchema.parse(structuredClone(candidate));
+    await this.putJson(buyerSearchClaimPath(claim.searchId), claim, false);
+    return BuyerSearchClaimSchema.parse(structuredClone(claim));
+  }
+
+  async readBuyerSearchClaim(searchId: string): Promise<BuyerSearchClaim> {
+    const claim = await this.readJson(buyerSearchClaimPath(searchId), BuyerSearchClaimSchema);
+    if (claim.searchId !== searchId) throw new RepositoryDataError("Stored buyer-search claim does not match its path");
+    return claim;
+  }
+
+  async createBuyerSearchSelection(candidate: BuyerSearchSelectionRecord): Promise<BuyerSearchSelectionRecord> {
+    const selection = BuyerSearchSelectionRecordSchema.parse(structuredClone(candidate));
+    const claim = await this.readBuyerSearchClaim(selection.searchId);
+    if (claim.query !== selection.query) throw new TypeError("Buyer-search selection must match its immutable claim");
+    await this.putJson(buyerSearchSelectionPath(selection.searchId), selection, false);
+    return BuyerSearchSelectionRecordSchema.parse(structuredClone(selection));
+  }
+
+  async readBuyerSearchSelection(searchId: string): Promise<BuyerSearchSelectionRecord> {
+    const selection = await this.readJson(buyerSearchSelectionPath(searchId), BuyerSearchSelectionRecordSchema);
+    if (selection.searchId !== searchId) throw new RepositoryDataError("Stored buyer-search selection does not match its path");
+    const claim = await this.readBuyerSearchClaim(searchId);
+    if (claim.query !== selection.query) throw new RepositoryDataError("Stored buyer-search selection does not match its claim");
+    return selection;
   }
 
   async publishSellerListing(candidate: ActiveListing): Promise<MarketplaceListing> {

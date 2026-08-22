@@ -165,6 +165,50 @@ describe("VercelBlobMarketplaceRepository", () => {
     await expect(repository.createPublicationRequest(request)).rejects.toBeInstanceOf(RepositoryConflictError);
   });
 
+  it("stores only validated buyer-search claims and selections at immutable private paths", async () => {
+    const transport = new FakeBlobTransport();
+    const repository = new VercelBlobMarketplaceRepository(transport);
+    const claim = {
+      searchId: "search-durable-1",
+      query: "Find a MacBook below 900 USDC.",
+      requestedAt: "2026-08-21T10:00:00.000Z",
+    };
+    const selection = {
+      searchId: claim.searchId,
+      query: claim.query,
+      interpretedConstraints: {
+        categories: ["electronics" as const],
+        maximumAtomicAmount: "900000000",
+        acceptableConditions: ["very_good" as const],
+        requiredTerms: ["MacBook"],
+        excludedDefectTerms: [],
+      },
+      matches: [{
+        listingId: activeListing.listingId,
+        score: 0.9,
+        fitExplanation: "The MacBook matches the requested model and price limit.",
+        evidenceIds: ["evidence-1"],
+        assumptionIds: ["assumption-1"],
+      }],
+      generatedAt: "2026-08-21T10:01:00.000Z",
+    };
+    await repository.createBuyerSearchClaim(claim);
+    await repository.createBuyerSearchSelection(selection);
+    expect(transport.puts).toEqual([
+      expect.objectContaining({
+        pathname: "records/searches/buyer/search-durable-1/claim.json",
+        options: expect.objectContaining({ access: "private", allowOverwrite: false, addRandomSuffix: false }),
+      }),
+      expect.objectContaining({
+        pathname: "records/searches/buyer/search-durable-1/selection.json",
+        options: expect.objectContaining({ access: "private", allowOverwrite: false, addRandomSuffix: false }),
+      }),
+    ]);
+    expect(await repository.readBuyerSearchSelection(claim.searchId)).toEqual(selection);
+    expect(String(transport.stored.get(transport.puts[1].pathname)?.body)).not.toContain("pathname");
+    await expect(repository.createBuyerSearchSelection(selection)).rejects.toBeInstanceOf(RepositoryConflictError);
+  });
+
   it("creates and lists immutable sold comparables with strict path binding and bounds", async () => {
     const transport = new FakeBlobTransport();
     const repository = new VercelBlobMarketplaceRepository(transport);

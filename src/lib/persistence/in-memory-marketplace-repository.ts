@@ -1,5 +1,11 @@
 import { z } from "zod";
 import {
+  BuyerSearchClaimSchema,
+  BuyerSearchSelectionRecordSchema,
+  type BuyerSearchClaim,
+  type BuyerSearchSelectionRecord,
+} from "../domain/buyer-search";
+import {
   ActiveListingSchema,
   MediaReferenceSchema,
   ReconciliationFailureSchema,
@@ -13,7 +19,7 @@ import {
   type SettlementReceipt,
   type SoldComparable,
 } from "../domain/marketplace";
-import { analysisStartClaimPath, analysisStartConfirmationPath, durableRunPath, publicationRequestPath, publishedListingPath, reconciliationRecordPath, settlementReceiptPath, soldComparablePath } from "./paths";
+import { analysisStartClaimPath, analysisStartConfirmationPath, buyerSearchClaimPath, buyerSearchSelectionPath, durableRunPath, publicationRequestPath, publishedListingPath, reconciliationRecordPath, settlementReceiptPath, soldComparablePath } from "./paths";
 import {
   AnalysisStartClaimSchema,
   AnalysisStartConfirmationSchema,
@@ -74,6 +80,8 @@ export class InMemoryMarketplaceRepository implements MarketplaceRepository {
   private readonly analysisStartClaims = new Map<string, AnalysisStartClaim>();
   private readonly analysisStartConfirmations = new Map<string, AnalysisStartConfirmation>();
   private readonly publicationRequests = new Map<string, PublicationRequestRecord>();
+  private readonly buyerSearchClaims = new Map<string, BuyerSearchClaim>();
+  private readonly buyerSearchSelections = new Map<string, BuyerSearchSelectionRecord>();
   private readonly receipts = new Map<string, SettlementReceipt>();
   private readonly reconciliations = new Map<string, ReconciliationFailure>();
   private readonly comparables = new Map<string, SoldComparable>();
@@ -189,6 +197,45 @@ export class InMemoryMarketplaceRepository implements MarketplaceRepository {
     );
     if (request.runId !== runId) throw new RepositoryDataError("Stored publication request does not match its path");
     return cloneRecord(request);
+  }
+
+  async createBuyerSearchClaim(candidate: BuyerSearchClaim): Promise<BuyerSearchClaim> {
+    const claim = BuyerSearchClaimSchema.parse(cloneRecord(candidate));
+    buyerSearchClaimPath(claim.searchId);
+    if (this.buyerSearchClaims.has(claim.searchId)) throw new RepositoryConflictError();
+    this.buyerSearchClaims.set(claim.searchId, cloneRecord(claim));
+    return BuyerSearchClaimSchema.parse(cloneRecord(claim));
+  }
+
+  async readBuyerSearchClaim(searchId: string): Promise<BuyerSearchClaim> {
+    buyerSearchClaimPath(searchId);
+    const stored = this.buyerSearchClaims.get(searchId);
+    if (!stored) throw new RepositoryNotFoundError("Buyer-search claim was not found");
+    const claim = parseStored(BuyerSearchClaimSchema, stored, "Stored buyer-search claim failed validation");
+    if (claim.searchId !== searchId) throw new RepositoryDataError("Stored buyer-search claim does not match its path");
+    return cloneRecord(claim);
+  }
+
+  async createBuyerSearchSelection(candidate: BuyerSearchSelectionRecord): Promise<BuyerSearchSelectionRecord> {
+    const selection = BuyerSearchSelectionRecordSchema.parse(cloneRecord(candidate));
+    buyerSearchSelectionPath(selection.searchId);
+    const claim = this.buyerSearchClaims.get(selection.searchId);
+    if (!claim) throw new RepositoryNotFoundError("Buyer-search claim was not found");
+    if (claim.query !== selection.query) throw new TypeError("Buyer-search selection must match its immutable claim");
+    if (this.buyerSearchSelections.has(selection.searchId)) throw new RepositoryConflictError();
+    this.buyerSearchSelections.set(selection.searchId, cloneRecord(selection));
+    return BuyerSearchSelectionRecordSchema.parse(cloneRecord(selection));
+  }
+
+  async readBuyerSearchSelection(searchId: string): Promise<BuyerSearchSelectionRecord> {
+    buyerSearchSelectionPath(searchId);
+    const stored = this.buyerSearchSelections.get(searchId);
+    if (!stored) throw new RepositoryNotFoundError("Buyer-search selection was not found");
+    const selection = parseStored(BuyerSearchSelectionRecordSchema, stored, "Stored buyer-search selection failed validation");
+    if (selection.searchId !== searchId) throw new RepositoryDataError("Stored buyer-search selection does not match its path");
+    const claim = this.buyerSearchClaims.get(searchId);
+    if (!claim || claim.query !== selection.query) throw new RepositoryDataError("Stored buyer-search selection does not match its claim");
+    return cloneRecord(selection);
   }
 
   async publishSellerListing(candidate: ActiveListing): Promise<MarketplaceListing> {

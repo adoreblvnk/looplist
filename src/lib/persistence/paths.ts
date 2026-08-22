@@ -66,6 +66,14 @@ export function publicationRequestPath(runId: string): string {
   return `records/runs/publication-request/${id(runId)}.json`;
 }
 
+export function buyerSearchClaimPath(searchId: string): string {
+  return `records/searches/buyer/${id(searchId)}/claim.json`;
+}
+
+export function buyerSearchSelectionPath(searchId: string): string {
+  return `records/searches/buyer/${id(searchId)}/selection.json`;
+}
+
 export function parsePrivateMediaReference(value: unknown): MediaReference {
   return MediaReferenceSchema.parse(value);
 }
@@ -113,3 +121,13 @@ export const ReconciliationRecordPathSchema = z
     ),
     "Invalid reconciliation record path"
   );
+
+export const BuyerSearchClaimPathSchema = z.string().regex(
+  new RegExp(`^records/searches/buyer/${CanonicalPathIdentifierPattern}/claim\\.json$`),
+  "Invalid immutable buyer-search claim path"
+);
+
+export const BuyerSearchSelectionPathSchema = z.string().regex(
+  new RegExp(`^records/searches/buyer/${CanonicalPathIdentifierPattern}/selection\\.json$`),
+  "Invalid immutable buyer-search selection path"
+);

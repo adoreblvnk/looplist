@@ -21,3 +21,27 @@ export interface AnalysisSuccess {
     rationale: string;
   };
 }
+
+export interface BuyerSearchMatch {
+  rank: number;
+  score: number;
+  fitExplanation: string;
+  visibleDefects: string[];
+  evidence: Array<{ evidenceId: string; claim: string; confidence: "low" | "medium" | "high" }>;
+  assumptions: Array<{ assumptionId: string; field: string; value: string; confidence: "low" | "medium" | "high" }>;
+  listing: Listing;
+}
+
+export interface BuyerSearchResponse {
+  searchId: string;
+  query: string;
+  createdAt: string;
+  interpretedConstraints: {
+    categories: Category[];
+    maximumAtomicAmount: string | null;
+    acceptableConditions: Condition[];
+    requiredTerms: string[];
+    excludedDefectTerms: string[];
+  };
+  matches: BuyerSearchMatch[];
+}

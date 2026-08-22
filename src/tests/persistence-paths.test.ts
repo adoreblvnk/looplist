@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  BuyerSearchClaimPathSchema,
+  BuyerSearchSelectionPathSchema,
   DurableRunPathSchema,
   PublishedListingPathSchema,
   ReconciliationRecordPathSchema,
   SettlementReceiptPathSchema,
   SoldComparablePathSchema,
+  buyerSearchClaimPath,
+  buyerSearchSelectionPath,
   durableRunPath,
   publishedListingPath,
   reconciliationRecordPath,
@@ -24,6 +28,8 @@ describe("private persistence path builders", () => {
     expect(durableRunPath("purchase", "run-3")).toBe("records/runs/purchase/run-3.json");
     expect(settlementReceiptPath("purchase:listing-1")).toBe("records/settlements/receipts/purchase:listing-1.json");
     expect(reconciliationRecordPath("purchase:listing-1", "failure-1")).toBe("records/settlements/reconciliation/purchase:listing-1/failure-1.json");
+    expect(buyerSearchClaimPath("search-1")).toBe("records/searches/buyer/search-1/claim.json");
+    expect(buyerSearchSelectionPath("search-1")).toBe("records/searches/buyer/search-1/selection.json");
   });
 
   it("builds media paths aligned with MediaReference grammar", () => {
@@ -41,17 +47,23 @@ describe("private persistence path builders", () => {
     expect(DurableRunPathSchema.safeParse(durableRunPath("analysis", max)).success).toBe(true);
     expect(SettlementReceiptPathSchema.safeParse(settlementReceiptPath(`purchase:${max}`)).success).toBe(true);
     expect(ReconciliationRecordPathSchema.safeParse(reconciliationRecordPath(`purchase:${max}`, max)).success).toBe(true);
+    expect(BuyerSearchClaimPathSchema.safeParse(buyerSearchClaimPath(max)).success).toBe(true);
+    expect(BuyerSearchSelectionPathSchema.safeParse(buyerSearchSelectionPath(max)).success).toBe(true);
 
     expect(() => publishedListingPath(tooLong)).toThrow();
     expect(() => soldComparablePath(tooLong)).toThrow();
     expect(() => durableRunPath("analysis", tooLong)).toThrow();
     expect(() => settlementReceiptPath(`purchase:${tooLong}`)).toThrow();
     expect(() => reconciliationRecordPath("purchase:x", tooLong)).toThrow();
+    expect(() => buyerSearchClaimPath(tooLong)).toThrow();
+    expect(() => buyerSearchSelectionPath(tooLong)).toThrow();
     expect(PublishedListingPathSchema.safeParse(`records/listings/${tooLong}/published.json`).success).toBe(false);
     expect(SoldComparablePathSchema.safeParse(`records/comparables/sold/${tooLong}.json`).success).toBe(false);
     expect(DurableRunPathSchema.safeParse(`records/runs/analysis/${tooLong}.json`).success).toBe(false);
     expect(SettlementReceiptPathSchema.safeParse(`records/settlements/receipts/purchase:${tooLong}.json`).success).toBe(false);
     expect(ReconciliationRecordPathSchema.safeParse(`records/settlements/reconciliation/purchase:x/${tooLong}.json`).success).toBe(false);
+    expect(BuyerSearchClaimPathSchema.safeParse(`records/searches/buyer/${tooLong}/claim.json`).success).toBe(false);
+    expect(BuyerSearchSelectionPathSchema.safeParse(`records/searches/buyer/${tooLong}/selection.json`).success).toBe(false);
   });
 
   it.each([
@@ -72,6 +84,8 @@ describe("private persistence path builders", () => {
     expect(() => durableRunPath("analysis", hostile)).toThrow();
     expect(() => seedMediaPath(hostile, "photo-1", "jpg")).toThrow();
     expect(() => uploadedMediaPath("session-1", hostile, "jpg")).toThrow();
+    expect(() => buyerSearchClaimPath(hostile)).toThrow();
+    expect(() => buyerSearchSelectionPath(hostile)).toThrow();
   });
 
   it("rejects unsupported run kinds and purchase IDs", () => {
@@ -89,6 +103,8 @@ describe("private persistence path builders", () => {
     [DurableRunPathSchema, "records/runs/analysis/../run.json"],
     [SettlementReceiptPathSchema, "/records/settlements/receipts/purchase:x.json"],
     [ReconciliationRecordPathSchema, "records/settlements/reconciliation/purchase:x/http://evil.json"],
+    [BuyerSearchClaimPathSchema, "records/searches/buyer/../secret/claim.json"],
+    [BuyerSearchSelectionPathSchema, "https://store/records/searches/buyer/x/selection.json"],
   ])("strict pathname schemas reject hostile stored path", (schema, pathname) => {
     expect(schema.safeParse(pathname).success).toBe(false);
   });
