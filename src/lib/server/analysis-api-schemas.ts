@@ -45,6 +45,9 @@ export type AnalysisRunApiState = z.infer<typeof AnalysisRunApiStateSchema>;
 
 export function toAnalysisRunApiState(input: unknown): AnalysisRunApiState {
   const run = AnalysisRunStateSchema.parse(input);
+  const publicRun = structuredClone(run) as unknown as Record<string, unknown>;
+  delete publicRun.failureKind;
+  delete publicRun.failureStage;
   const media = run.media.map((value) => {
     const reference: Partial<typeof value> = structuredClone(value);
     delete reference.pathname;
@@ -56,7 +59,7 @@ export function toAnalysisRunApiState(input: unknown): AnalysisRunApiState {
     delete candidate.media;
     draft = candidate;
   }
-  return AnalysisRunApiStateSchema.parse({ ...run, media, ...(draft ? { draft } : {}) });
+  return AnalysisRunApiStateSchema.parse({ ...publicRun, media, ...(draft ? { draft } : {}) });
 }
 
 export const ApiErrorSchema = z.object({ error: z.object({ code: z.string(), message: z.string() }).strict() }).strict();

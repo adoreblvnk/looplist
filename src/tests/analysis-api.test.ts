@@ -14,6 +14,7 @@ import {
 import { AnalyzeAcceptedSchema, AnalyzeRequestSchema, AnalysisRunApiStateSchema } from "../lib/server/analysis-api-schemas";
 import { validDraft } from "./domain-fixtures";
 import { uploadedMediaPath } from "../lib/persistence/paths";
+import { ANALYSIS_RUN_FAILURES, AnalysisRunStateSchema } from "../lib/domain/marketplace";
 
 vi.mock("server-only", () => ({}));
 
@@ -272,6 +273,34 @@ describe("strict idempotent analysis API", () => {
     expect(serialized).not.toMatch(/https?:\/\//);
     expect(serialized).not.toContain(key);
     expect(serialized).not.toContain("wrun_private_engine_id");
+  });
+
+  it("projects a sanitized terminal model failure instead of leaking internal failure fields", async () => {
+    const dependencies = services();
+    const runId = "analysis_failed_projection";
+    const queued = await new AnalysisRunService(dependencies.repository, dependencies.clock).enqueue(runId, fullMedia());
+    await dependencies.repository.saveRunSnapshot(AnalysisRunStateSchema.parse({
+      ...queued,
+      status: "failed",
+      startedAt: dependencies.clock(),
+      failedAt: dependencies.clock(),
+      updatedAt: dependencies.clock(),
+      attempt: 2,
+      geminiAttempts: 2,
+      failureKind: "gemini",
+      failureStage: "gemini",
+      error: ANALYSIS_RUN_FAILURES.gemini,
+    }));
+
+    const response = await createAnalyzeGetHandler(() => dependencies)(new Request("http://localhost"), {
+      params: Promise.resolve({ runId }),
+    });
+    expect(response.status).toBe(200);
+    const payload = await body(response);
+    expect(payload).toMatchObject({ status: "failed", error: ANALYSIS_RUN_FAILURES.gemini });
+    expect(payload).not.toHaveProperty("failureKind");
+    expect(payload).not.toHaveProperty("failureStage");
+    expect(AnalysisRunApiStateSchema.safeParse(payload).success).toBe(true);
   });
 
   it.each([
