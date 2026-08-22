@@ -11,6 +11,7 @@ import { BASE_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_NETWORK } from "./wallet-config";
 import {
   selectExactPaymentRequirements,
   selectWalletConnector,
+  walletApprovalErrorMessage,
   walletConnectionErrorMessage,
   type WalletChoice,
 } from "./wallet-connection";
@@ -30,7 +31,7 @@ export function Checkout({ listingId }: { listingId: string }) {
   const pollCount = useRef(0);
   const connection = useConnection();
   const { connectAsync, connectors } = useConnect();
-  const { disconnect } = useDisconnect();
+  const { disconnect, disconnectAsync } = useDisconnect();
   const { switchChainAsync } = useSwitchChain();
   const { data: walletClient } = useWalletClient({ chainId: BASE_SEPOLIA_CHAIN_ID });
 
@@ -79,7 +80,12 @@ export function Checkout({ listingId }: { listingId: string }) {
     }
     setConnectingChoice(choice);
     try {
-      await connectAsync({ connector, chainId: BASE_SEPOLIA_CHAIN_ID });
+      const result = await connectAsync({ connector, chainId: BASE_SEPOLIA_CHAIN_ID });
+      if (result.chainId !== BASE_SEPOLIA_CHAIN_ID) {
+        await disconnectAsync({ connector });
+        setWalletError("That wallet connected on a different network. Reconnect with Base Account, or switch Coinbase Wallet to Base Sepolia first.");
+        return;
+      }
       setWalletModalOpen(false);
     } catch (error) {
       setWalletError(walletConnectionErrorMessage(choice, error));
@@ -136,9 +142,7 @@ export function Checkout({ listingId }: { listingId: string }) {
         : "Purchase complete.");
       await load();
     } catch (error) {
-      setMessage(error instanceof Error && error.message !== "wallet_not_ready"
-        ? error.message
-        : "Wallet authorization was not completed.");
+      setMessage(walletApprovalErrorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -212,9 +216,13 @@ function WalletChoiceModal({ connectingChoice, error, onChoose, onClose }: {
         </div>
         <p id="wallet-dialog-description">Connect on Base Sepolia to approve the exact test USDC payment.</p>
         <div className="wallet-options">
-          <button ref={primaryOption} className="wallet-option primary" type="button" disabled={connecting} onClick={() => onChoose("coinbase")}>
+          <button ref={primaryOption} className="wallet-option primary" type="button" disabled={connecting} onClick={() => onChoose("baseAccount")}>
             <span className="wallet-option-mark base-mark" aria-hidden="true">B</span>
-            <span><strong>{connectingChoice === "coinbase" ? "Opening Base / Coinbase…" : "Continue with Base / Coinbase"}</strong><small>Use a passkey or Coinbase sign-in, or scan a QR code with Coinbase Wallet mobile. No extension required.</small><em>Recommended</em></span>
+            <span><strong>{connectingChoice === "baseAccount" ? "Opening Base Account…" : "Continue with Base / Coinbase"}</strong><small>Use Base Account with a passkey or Coinbase sign-in. No browser extension required.</small><em>Recommended</em></span>
+          </button>
+          <button className="wallet-option" type="button" disabled={connecting} onClick={() => onChoose("coinbase")}>
+            <span className="wallet-option-mark base-mark" aria-hidden="true">C</span>
+            <span><strong>{connectingChoice === "coinbase" ? "Opening Coinbase Wallet QR…" : "Coinbase Wallet mobile"}</strong><small>Scan a QR code with the Coinbase Wallet mobile app and use its Base Sepolia account.</small></span>
           </button>
           <button className="wallet-option" type="button" disabled={connecting} onClick={() => onChoose("injected")}>
             <span className="wallet-option-mark" aria-hidden="true">↗</span>

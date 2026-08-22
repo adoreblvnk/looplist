@@ -1,5 +1,5 @@
 import { createConfig, http } from "wagmi";
-import { coinbaseWallet, injected } from "wagmi/connectors";
+import { baseAccount, coinbaseWallet, injected } from "wagmi/connectors";
 import { baseSepolia } from "wagmi/chains";
 
 export const BASE_SEPOLIA_CHAIN_ID = baseSepolia.id;
@@ -8,9 +8,12 @@ export const BASE_SEPOLIA_NETWORK = "eip155:84532" as const;
 export const walletConfig = createConfig({
   chains: [baseSepolia],
   connectors: [
+    baseAccount({
+      appName: "LoopList",
+    }),
     coinbaseWallet({
       appName: "LoopList",
-      preference: { options: "all" },
+      preference: { options: "eoaOnly" },
     }),
     injected(),
   ],

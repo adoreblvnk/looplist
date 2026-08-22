@@ -4,6 +4,7 @@ import { BASE_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_NETWORK, walletConfig } from "../co
 import {
   selectExactPaymentRequirements,
   selectWalletConnector,
+  walletApprovalErrorMessage,
   walletConnectionErrorMessage,
 } from "../components/marketplace/wallet-connection";
 
@@ -25,9 +26,10 @@ const expected = {
 };
 
 describe("buyer wallet connection", () => {
-  it("configures Base Sepolia with Coinbase first and injected second", () => {
+  it("configures Base Sepolia with Base Account, Coinbase mobile, and injected connectors", () => {
     expect(walletConfig.chains.map((chain) => chain.id)).toEqual([BASE_SEPOLIA_CHAIN_ID]);
-    expect(walletConfig.connectors.slice(0, 2).map(({ id, type }) => ({ id, type }))).toEqual([
+    expect(walletConfig.connectors.slice(0, 3).map(({ id, type }) => ({ id, type }))).toEqual([
+      { id: "baseAccount", type: "baseAccount" },
       { id: "coinbaseWalletSDK", type: "coinbaseWallet" },
       { id: "injected", type: "injected" },
     ]);
@@ -35,9 +37,11 @@ describe("buyer wallet connection", () => {
 
   it("selects the requested official connector without falling through to another wallet", () => {
     const connectors = [
+      { id: "baseAccount", type: "baseAccount" },
       { id: "coinbaseWalletSDK", type: "coinbaseWallet" },
       { id: "injected", type: "injected" },
     ];
+    expect(selectWalletConnector(connectors, "baseAccount")?.id).toBe("baseAccount");
     expect(selectWalletConnector(connectors, "coinbase")?.id).toBe("coinbaseWalletSDK");
     expect(selectWalletConnector(connectors, "injected")?.id).toBe("injected");
     expect(selectWalletConnector([], "coinbase")).toBeUndefined();
@@ -48,6 +52,9 @@ describe("buyer wallet connection", () => {
     expect(walletConnectionErrorMessage("injected", new Error("Provider not found"))).toMatch(/install or enable/i);
     expect(walletConnectionErrorMessage("coinbase", new Error("Popup blocked"))).toMatch(/allow pop-ups/i);
     expect(walletConnectionErrorMessage("coinbase", new Error("WebSocket network error"))).toMatch(/check your connection/i);
+    expect(walletConnectionErrorMessage("baseAccount", new Error("This chain is not supported"))).toMatch(/reconnect with Base Account/i);
+    expect(walletApprovalErrorMessage(new Error("Base Sepolia is not supported. Please try a different chain."))).toMatch(/disconnect and reconnect/i);
+    expect(walletApprovalErrorMessage(new Error("User denied request"))).toMatch(/no payment was authorized/i);
   });
 });
 
