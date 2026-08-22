@@ -1,6 +1,11 @@
 import type { PaymentRequirements } from "@x402/core/types";
 import { describe, expect, it } from "vitest";
-import { BASE_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_NETWORK, walletConfig } from "../components/marketplace/wallet-config";
+import {
+  BASE_ACCOUNT_PREFERENCE,
+  BASE_SEPOLIA_CHAIN_ID,
+  BASE_SEPOLIA_NETWORK,
+  walletConfig,
+} from "../components/marketplace/wallet-config";
 import {
   selectExactPaymentRequirements,
   selectWalletConnector,
@@ -27,6 +32,7 @@ const expected = {
 
 describe("buyer wallet connection", () => {
   it("configures Base Sepolia with Base Account, Coinbase mobile, and injected connectors", () => {
+    expect(BASE_ACCOUNT_PREFERENCE).toEqual({ telemetry: false });
     expect(walletConfig.chains.map((chain) => chain.id)).toEqual([BASE_SEPOLIA_CHAIN_ID]);
     expect(walletConfig.connectors.slice(0, 3).map(({ id, type }) => ({ id, type }))).toEqual([
       { id: "baseAccount", type: "baseAccount" },
