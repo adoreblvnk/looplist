@@ -90,7 +90,7 @@ export type DemoBuyerIdentity = z.infer<typeof DemoBuyerIdentitySchema>;
 export type SeededSellerIdentity = z.infer<typeof SeededSellerIdentitySchema>;
 export type SellerIdentity = z.infer<typeof SellerIdentitySchema>;
 
-export const MarketplaceCategorySchema = z.enum(["electronics", "running_shoes"]);
+export const MarketplaceCategorySchema = z.enum(["electronics", "running_shoes", "sneakers"]);
 export type MarketplaceCategory = z.infer<typeof MarketplaceCategorySchema>;
 
 export const ListingConditionSchema = z.enum([

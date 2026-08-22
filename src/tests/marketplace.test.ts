@@ -8,6 +8,7 @@ import {
   ListingAttributesSchema,
   ListingDraftSchema,
   ListingSchema,
+  MarketplaceCategorySchema,
   MediaReferenceSchema,
   MoneySchema,
   PaymentPendingListingSchema,
@@ -141,6 +142,13 @@ function submittedPurchaseRun(
 }
 
 describe("authoritative marketplace records", () => {
+  it("accepts the upstream electronics, running-shoe, and lifestyle-sneaker categories", () => {
+    expect(MarketplaceCategorySchema.options).toEqual(["electronics", "running_shoes", "sneakers"]);
+    expect(MarketplaceCategorySchema.parse("electronics")).toBe("electronics");
+    expect(MarketplaceCategorySchema.parse("running_shoes")).toBe("running_shoes");
+    expect(MarketplaceCategorySchema.parse("sneakers")).toBe("sneakers");
+  });
+
   it("accepts complete listing, pricing, search, reservation, and receipt records", () => {
     expect(DemoIdentitySchema.parse(DEMO_SELLER)).toEqual(DEMO_SELLER);
     expect(DemoIdentitySchema.parse(DEMO_BUYER)).toEqual(DEMO_BUYER);
