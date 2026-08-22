@@ -174,7 +174,7 @@ export function Checkout({ listingId }: { listingId: string }) {
   return (
     <section className="checkout-panel" aria-labelledby="checkout-title">
       <div className="checkout-heading"><div><p className="eyebrow">Protected checkout</p><h2 id="checkout-title">Review and purchase</h2></div><span className={`commerce-status ${checkout.status}`}>{humanize(checkout.status)}</span></div>
-      <dl className="approval-facts"><div><dt>Listing</dt><dd>{checkout.title}</dd></div><div><dt>Exact total</dt><dd>{displayPrice(checkout.amount)}</dd></div><div><dt>Condition</dt><dd>{humanize(checkout.condition)} · {checkout.conditionSummary}</dd></div><div><dt>Recipient</dt><dd className="mono break">{checkout.recipientAddress}</dd></div><div><dt>Payment network</dt><dd>Base Sepolia · test USDC</dd></div></dl>
+      <dl className="approval-facts"><div><dt>Listing</dt><dd>{checkout.title}</dd></div><div><dt>Total</dt><dd>{displayPrice(checkout.amount)}</dd></div><div><dt>Condition</dt><dd>{humanize(checkout.condition)} · {checkout.conditionSummary}</dd></div><div><dt>Recipient</dt><dd className="mono break">{checkout.recipientAddress}</dd></div><div><dt>Payment network</dt><dd>Base Sepolia · test USDC</dd></div></dl>
       {checkout.status === "reconciliation_failed"
         ? <button className="button" disabled={busy} onClick={reconcile}>Retry receipt reconciliation</button>
         : checkout.status === "settlement_pending"

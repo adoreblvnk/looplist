@@ -13,10 +13,10 @@ import type {
 } from "./types";
 import {
   displayListingPrice,
-  formatUsdcAtomic,
+  formatDisplayedUsdcAtomic,
   friendlyError,
   idempotencyKey,
-  parseUsdcInput,
+  parseDisplayedUsdcInput,
 } from "./utils";
 import { analysisPhotosAreBound } from "./sell-flow-lifecycle";
 
@@ -214,7 +214,7 @@ export function SellFlow() {
           assertActive(signal, mounted);
           setAnalysis(state);
           setDraft(state.draft);
-          setPrice(formatUsdcAtomic(state.priceRecommendation.recommendedPrice.atomicAmount));
+          setPrice(formatDisplayedUsdcAtomic(state.priceRecommendation.recommendedPrice.atomicAmount));
           setTerminalFailed(false);
           setStep("review");
           return;
@@ -272,10 +272,10 @@ export function SellFlow() {
       setMessage("Check the highlighted listing field before publishing.");
       return;
     }
-    const atomic = parseUsdcInput(price);
+    const atomic = parseDisplayedUsdcInput(price);
     if (!atomic) {
       priceInput.current?.focus();
-      setMessage("Enter a price above zero with no more than six decimal places.");
+      setMessage("Enter a price above zero with no more than three decimal places.");
       return;
     }
     if (!analysisPhotosAreBound(
@@ -534,7 +534,7 @@ function Review({
             aria-describedby="price-help"
           />
         </Field>
-        <small id="price-help">The recommendation is guidance. You choose the final exact price.</small>
+        <small id="price-help">The recommendation is guidance. You choose the final listing price.</small>
 
         <h2>Comparable sales</h2>
         {analysis.priceRecommendation.comparables.map((comparable) => (
