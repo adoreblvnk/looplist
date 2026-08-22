@@ -16,6 +16,7 @@ import {
   BuyerSearchRequestSchema,
   type BuyerSearchSelectionRecord,
 } from "../domain/buyer-search";
+import { DEMO_BUYER_QUERY } from "../domain/demo-buyer-search";
 import { createMarketplaceRepository } from "../persistence/production-repository";
 import {
   RepositoryConflictError,
@@ -32,6 +33,7 @@ export interface BuyerSearchApiServices {
   repository: MarketplaceRepository;
   generator: BuyerSearchGenerator;
   clock: () => string;
+  fixedDemoSearch?: boolean;
 }
 
 function productionServices(): BuyerSearchApiServices {
@@ -39,6 +41,7 @@ function productionServices(): BuyerSearchApiServices {
     repository: createMarketplaceRepository(),
     generator: new GemmaBuyerSearchGenerator(),
     clock: () => new Date().toISOString(),
+    fixedDemoSearch: true,
   };
 }
 
@@ -102,6 +105,44 @@ async function hydrateStoredSelection(
   });
 }
 
+const DEMO_MAXIMUM_RAW_ATOMIC_AMOUNT = BigInt(120_000);
+const DEMO_CONDITION_PRIORITY = ["new", "like_new", "very_good", "good", "acceptable", "for_parts"];
+
+async function generateFixedDemoSearch(
+  services: BuyerSearchApiServices,
+  searchId: string
+): Promise<HydratedBuyerSearch> {
+  const prepared = await prepareBuyerSearch(services.repository, DEMO_BUYER_QUERY);
+  const listing = prepared.listings
+    .filter((candidate) =>
+      candidate.category === "sneakers" &&
+      /\bair\s+force\s+1\b/i.test(candidate.title) &&
+      BigInt(candidate.price.atomicAmount) <= DEMO_MAXIMUM_RAW_ATOMIC_AMOUNT
+    )
+    .sort((left, right) => {
+      const conditionDifference =
+        DEMO_CONDITION_PRIORITY.indexOf(left.condition) - DEMO_CONDITION_PRIORITY.indexOf(right.condition);
+      return conditionDifference || Number(BigInt(right.price.atomicAmount) - BigInt(left.price.atomicAmount));
+    })[0];
+
+  return hydrateBuyerSearch(prepared, searchId, services.clock(), {
+    interpretedConstraints: {
+      categories: ["sneakers"],
+      maximumAtomicAmount: "120000000",
+      acceptableConditions: ["new", "like_new", "very_good", "good"],
+      requiredTerms: ["Air Force 1"],
+      excludedDefectTerms: [],
+    },
+    matches: listing ? [{
+      listingId: listing.listingId,
+      score: 0.99,
+      fitExplanation: `${listing.title} matches Air Force 1 under 120 USDC and is listed in ${listing.condition.replaceAll("_", " ")} condition.`,
+      evidenceIds: listing.evidence.slice(0, 3).map(({ id }) => id),
+      assumptionIds: [],
+    }] : [],
+  });
+}
+
 function isTimeout(error: unknown): boolean {
   return (
     (error instanceof DOMException && error.name === "TimeoutError") ||
@@ -141,6 +182,9 @@ export function createBuyerSearchPostHandler(
     try {
       const services = servicesFactory();
       const searchId = await deriveBuyerSearchId(key);
+      if (services.fixedDemoSearch) {
+        return json(publicResult(await generateFixedDemoSearch(services, searchId)), 200);
+      }
       const candidateClaim = BuyerSearchClaimSchema.parse({
         searchId,
         query: input.query,

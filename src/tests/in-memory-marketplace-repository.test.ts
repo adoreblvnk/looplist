@@ -17,7 +17,7 @@ const seededListing = ActiveListingSchema.parse({
   source: "seed",
   seller: {
     id: "seed-seller-integrity",
-    displayName: "Integrity Seller (Demo)",
+    displayName: "Integrity Seller",
     role: "seller",
     fictional: true,
   },
@@ -198,7 +198,7 @@ describe("InMemoryMarketplaceRepository", () => {
   it("rejects every schema-valid incoming receipt mismatch before writing", async () => {
     const mismatches = [
       (receipt: ReturnType<typeof seededReceipt>) => ({ ...receipt, listingTitle: "Different valid listing title" }),
-      (receipt: ReturnType<typeof seededReceipt>) => ({ ...receipt, seller: { ...receipt.seller, displayName: "Different Seller (Demo)" } }),
+      (receipt: ReturnType<typeof seededReceipt>) => ({ ...receipt, seller: { ...receipt.seller, displayName: "Different Seller" } }),
       (receipt: ReturnType<typeof seededReceipt>) => ({ ...receipt, recipientAddress: "0x2222222222222222222222222222222222222222" }),
       (receipt: ReturnType<typeof seededReceipt>) => ({ ...receipt, amount: { ...receipt.amount, atomicAmount: "500000001" } }),
     ];
@@ -217,7 +217,7 @@ describe("InMemoryMarketplaceRepository", () => {
   it("fails closed on stored receipt mismatches during both receipt reads and sold derivation", async () => {
     const mismatches = [
       (receipt: ReturnType<typeof seededReceipt>) => ({ ...receipt, listingTitle: "Different valid listing title" }),
-      (receipt: ReturnType<typeof seededReceipt>) => ({ ...receipt, seller: { ...receipt.seller, displayName: "Different Seller (Demo)" } }),
+      (receipt: ReturnType<typeof seededReceipt>) => ({ ...receipt, seller: { ...receipt.seller, displayName: "Different Seller" } }),
       (receipt: ReturnType<typeof seededReceipt>) => ({ ...receipt, recipientAddress: "0x2222222222222222222222222222222222222222" }),
       (receipt: ReturnType<typeof seededReceipt>) => ({ ...receipt, amount: { ...receipt.amount, atomicAmount: "500000001" } }),
     ];

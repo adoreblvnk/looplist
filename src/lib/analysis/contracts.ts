@@ -54,7 +54,7 @@ export const GeminiListingCandidateSchema = z
   .strict();
 export type GeminiListingCandidate = z.infer<typeof GeminiListingCandidateSchema>;
 
-export const GemmaPriceCandidateSchema = z
+const GemmaPriceCandidateObjectSchema = z
   .object({
     recommendedAtomicAmount: UsdcAtomicAmountSchema.refine((value) => value !== "0"),
     minimumAtomicAmount: UsdcAtomicAmountSchema.refine((value) => value !== "0"),
@@ -75,6 +75,27 @@ export const GemmaPriceCandidateSchema = z
     rationale: z.string().trim().min(20).max(1_500),
   })
   .strict();
+
+const GEMMA_ATOMIC_AMOUNT_KEYS = [
+  "recommendedAtomicAmount",
+  "minimumAtomicAmount",
+  "maximumAtomicAmount",
+] as const;
+
+export const GemmaPriceCandidateSchema = z.preprocess((value) => {
+  const unwrapped = Array.isArray(value) && value.length === 1 ? value[0] : value;
+  if (typeof unwrapped !== "object" || unwrapped === null || Array.isArray(unwrapped)) return unwrapped;
+  const candidate: Record<string, unknown> = { ...unwrapped };
+  for (const key of GEMMA_ATOMIC_AMOUNT_KEYS) {
+    const amount = candidate[key];
+    if (typeof amount === "number" && Number.isSafeInteger(amount)) {
+      candidate[key] = String(amount);
+    } else if (typeof amount === "string" && /^\d{1,3}(?:,\d{3})+$/.test(amount)) {
+      candidate[key] = amount.replaceAll(",", "");
+    }
+  }
+  return candidate;
+}, GemmaPriceCandidateObjectSchema);
 export type GemmaPriceCandidate = z.infer<typeof GemmaPriceCandidateSchema>;
 
 export interface ListingGeneratorPhoto {

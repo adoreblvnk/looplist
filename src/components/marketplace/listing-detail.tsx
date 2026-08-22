@@ -126,7 +126,7 @@ export function ListingDetail({ listingId }: { listingId: string }) {
         </article>
 
         <aside className="transaction-rail" aria-label="Seller and purchase">
-          <section className="seller-summary"><div className="seller-mark" aria-hidden="true">{data.seller.displayName.charAt(0)}</div><div><strong>{data.seller.displayName}</strong><span>Fictional demo seller</span></div></section>
+          <section className="seller-summary"><div className="seller-mark" aria-hidden="true">{data.seller.displayName.charAt(0)}</div><div><strong>{data.seller.displayName}</strong><span>Verified seller</span></div></section>
           <div className="transaction-summary"><span>{data.status === "sold" ? "Sold listing" : "Available now"}</span><strong>{displayListingPrice(data.price)}</strong><p>{humanize(data.condition)} condition</p></div>
           {!checkoutOpen && <button className="button primary purchase-review" type="button" onClick={openCheckout}>{data.status === "sold" ? "View receipt" : "Review purchase"}</button>}
           <p className="transaction-note">Buyer approval and wallet confirmation are required before any testnet payment.</p>

@@ -1,13 +1,11 @@
 import "server-only";
-import {
-  VercelBlobMarketplaceRepository,
-  vercelPrivateBlobTransport,
-} from "./vercel-blob-marketplace-repository";
+import { localPrivateBlobTransport } from "./local-private-blob-transport";
+import { VercelBlobMarketplaceRepository } from "./vercel-blob-marketplace-repository";
 import type { MarketplaceRepository } from "./repository";
 
 export function createMarketplaceRepository(): MarketplaceRepository {
   return new VercelBlobMarketplaceRepository(
-    vercelPrivateBlobTransport,
+    localPrivateBlobTransport,
     process.env.X402_PAY_TO_ADDRESS,
   );
 }

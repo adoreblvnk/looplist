@@ -1,13 +1,4 @@
 import "server-only";
-import {
-  BlobNotFoundError,
-  BlobPreconditionFailedError,
-  del,
-  get,
-  head,
-  list,
-  put,
-} from "@vercel/blob";
 import { z } from "zod";
 import {
   BuyerSearchClaimSchema,
@@ -133,27 +124,7 @@ export interface PrivateBlobTransport {
   del(pathname: string): Promise<void>;
 }
 
-export const vercelPrivateBlobTransport: PrivateBlobTransport = {
-  async put(pathname, body, options) {
-    return put(pathname, typeof body === "string" ? body : Buffer.from(body), options);
-  },
-  async get(pathname, options) {
-    const result = await get(pathname, options);
-    return result?.statusCode === 200 ? result : null;
-  },
-  async head(pathname) {
-    return head(pathname);
-  },
-  async list(options) {
-    return list(options);
-  },
-  async del(pathname) {
-    await del(pathname);
-  },
-};
-
 function isProviderNotFound(error: unknown): boolean {
-  if (error instanceof BlobNotFoundError) return true;
   const candidate = ProviderErrorShapeSchema.safeParse(error);
   if (!candidate.success) return false;
   return (
@@ -165,7 +136,6 @@ function isProviderNotFound(error: unknown): boolean {
 }
 
 function isProviderConflict(error: unknown): boolean {
-  if (error instanceof BlobPreconditionFailedError) return true;
   if (
     error instanceof Error &&
     error.message.startsWith("Vercel Blob: This blob already exists,")
@@ -252,7 +222,7 @@ function encodeJson(value: unknown): string {
 
 export class VercelBlobMarketplaceRepository implements MarketplaceRepository {
   constructor(
-    private readonly transport: PrivateBlobTransport = vercelPrivateBlobTransport,
+    private readonly transport: PrivateBlobTransport,
     private readonly seedRecipientAddress?: string,
   ) {}
 

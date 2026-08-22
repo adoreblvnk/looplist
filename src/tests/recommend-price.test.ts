@@ -164,6 +164,20 @@ describe("Gemma comparable pricing core", () => {
     ).rejects.toMatchObject({ code: "price_candidate_duplicate_comparable" });
   });
 
+  it("normalizes harmless Gemma price-output formatting variance", () => {
+    const candidate = priceCandidate();
+    expect(GemmaPriceCandidateSchema.parse([{
+      ...candidate,
+      recommendedAtomicAmount: 850000000,
+      minimumAtomicAmount: "800,000,000",
+      maximumAtomicAmount: 900000000,
+    }])).toMatchObject({
+      recommendedAtomicAmount: "850000000",
+      minimumAtomicAmount: "800000000",
+      maximumAtomicAmount: "900000000",
+    });
+  });
+
   it("rejects invalid atomic amounts, inverted ranges, and invalid strongest comparable IDs", async () => {
     const repository = new InMemoryMarketplaceRepository({ soldComparables: [comparable] });
     const invalid = [

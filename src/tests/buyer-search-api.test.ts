@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BuyerSearchGenerator } from "../lib/analysis/buyer-search-contracts";
+import { DEMO_BUYER_QUERY } from "../lib/domain/demo-buyer-search";
 import { InMemoryMarketplaceRepository } from "../lib/persistence/in-memory-marketplace-repository";
 import {
   createBuyerSearchPostHandler,
   deriveBuyerSearchId,
   type BuyerSearchApiServices,
 } from "../lib/server/buyer-search-api";
-import { activeListing } from "./domain-fixtures";
+import { activeListing, money } from "./domain-fixtures";
 
 vi.mock("server-only", () => ({}));
 
@@ -34,9 +35,10 @@ function output() {
 
 function services(
   repository = new InMemoryMarketplaceRepository({ listings: [activeListing] }),
-  generator: BuyerSearchGenerator = { generate: vi.fn(async () => output()) }
+  generator: BuyerSearchGenerator = { generate: vi.fn(async () => output()) },
+  fixedDemoSearch = false
 ): BuyerSearchApiServices {
-  return { repository, generator, clock: () => NOW };
+  return { repository, generator, clock: () => NOW, fixedDemoSearch };
 }
 
 function request(query = QUERY, key = "buyer-search-key-0001", contentType = "application/json") {
@@ -48,6 +50,32 @@ function request(query = QUERY, key = "buyer-search-key-0001", contentType = "ap
 }
 
 describe("buyer search API", () => {
+  it("returns the fixed Air Force 1 demo result without calling Gemma", async () => {
+    const demoListing = structuredClone(activeListing);
+    demoListing.listingId = "listing-air-force-demo";
+    demoListing.approvedDraft.title = "Nike Air Force 1 Low White Sneakers";
+    demoListing.approvedDraft.category = "sneakers";
+    demoListing.approvedDraft.brand = "Nike";
+    demoListing.approvedDraft.model = "Air Force 1";
+    demoListing.approvedDraft.condition = "like_new";
+    demoListing.approvedPrice = money("118500");
+    const generator: BuyerSearchGenerator = {
+      generate: vi.fn(async () => { throw new Error("Gemma must not run for the fixed demo query"); }),
+    };
+    const repository = new InMemoryMarketplaceRepository({ listings: [demoListing] });
+
+    const response = await createBuyerSearchPostHandler(() => services(repository, generator, true))(
+      request("This submitted wording is deliberately ignored.", "buyer-search-key-fixed-demo")
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.query).toBe(DEMO_BUYER_QUERY);
+    expect(payload.matches[0].listing.listingId).toBe(demoListing.listingId);
+    expect(payload.matches[0].score).toBe(0.99);
+    expect(generator.generate).not.toHaveBeenCalled();
+  });
+
   it("returns a strict grounded projection without private storage or settlement leakage", async () => {
     const response = await createBuyerSearchPostHandler(() => services())(request());
     expect(response.status).toBe(201);

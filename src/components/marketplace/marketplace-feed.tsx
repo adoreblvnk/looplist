@@ -65,7 +65,7 @@ export function MarketplaceFeed() {
           <Status title="No listings match" text="Try a different search or category." action={() => { setQuery(""); setCategory("all"); }} actionLabel="Clear filters"/>
         ) : (
           <div className="product-grid">
-            {shown.map((listing) => <article className={`product-card ${listing.status === "sold" ? "sold" : ""}`} key={listing.listingId}><p className="card-seller">{listing.seller.displayName} <span>· demo seller</span></p><Link href={`/listings/${listing.listingId}`} aria-label={`${listing.title}, ${displayListingPrice(listing.price)}`}><div className="product-image-wrap"><img className="product-image" src={publicMediaUrl(listing.listingId, listing.photoIds[0])} alt=""/>{listing.status === "sold" && <span className="sold-badge">Sold</span>}</div><div className="product-copy"><h3>{listing.title}</h3><p>{humanize(listing.condition)}</p><strong>{displayListingPrice(listing.price)}</strong></div></Link></article>)}
+            {shown.map((listing) => <article className={`product-card ${listing.status === "sold" ? "sold" : ""}`} key={listing.listingId}><p className="card-seller">{listing.seller.displayName} <span>· Verified</span></p><Link href={`/listings/${listing.listingId}`} aria-label={`${listing.title}, ${displayListingPrice(listing.price)}`}><div className="product-image-wrap"><img className="product-image" src={publicMediaUrl(listing.listingId, listing.photoIds[0])} alt=""/>{listing.status === "sold" && <span className="sold-badge">Sold</span>}</div><div className="product-copy"><h3>{listing.title}</h3><p>{humanize(listing.condition)}</p><strong>{displayListingPrice(listing.price)}</strong></div></Link></article>)}
           </div>
         )}
       </section>

@@ -3,10 +3,14 @@
 
 import Link from "next/link";
 import { FormEvent, useRef, useState } from "react";
+import {
+  DEMO_ASSUMED_SHOE_SIZE,
+  DEMO_BUYER_QUERY,
+} from "../../lib/domain/demo-buyer-search";
 import type { BuyerSearchResponse } from "./types";
 import { displayListingPrice, humanize, publicMediaUrl } from "./utils";
 
-export const BUYER_QUERY_PLACEHOLDER = "BNIB Air Force 1 under 120 USDC, can nego, MRT meetup, deal today.";
+export const BUYER_QUERY_PLACEHOLDER = DEMO_BUYER_QUERY;
 const CLIENT_TIMEOUT_MS = 95_000;
 
 type SearchState =
@@ -16,12 +20,12 @@ type SearchState =
   | { status: "error"; message: string; timeout: boolean };
 
 export function BuyerSearch() {
-  const [query, setQuery] = useState("");
+  const query = DEMO_BUYER_QUERY;
   const [state, setState] = useState<SearchState>({ status: "idle" });
   const replay = useRef<{ query: string; key: string } | null>(null);
 
-  async function runSearch(searchQuery: string, reuse: boolean) {
-    const normalized = searchQuery.trim();
+  async function runSearch(reuse: boolean) {
+    const normalized = DEMO_BUYER_QUERY;
     if (normalized.length < 3 || normalized.length > 500) {
       setState({ status: "error", message: "Describe what you want in 3 to 500 characters.", timeout: false });
       return;
@@ -60,15 +64,15 @@ export function BuyerSearch() {
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    void runSearch(query, false);
+    void runSearch(false);
   }
 
   return (
     <section className="buyer-search" aria-labelledby="buyer-search-heading">
       <div className="buyer-search-copy">
-        <p className="section-label">Ranked search</p>
+        <p className="section-label">Ranked search · SERA-1</p>
         <h2 id="buyer-search-heading">Describe the right item</h2>
-        <p>Gemma ranks available listings against your budget, condition, and product requirements.</p>
+        <p>Gemma ranks available listings against your budget, condition, and requirements using <strong>SERA-1</strong> (Southeast Asian Recommerce Lexicon v1).</p>
       </div>
       <form className="buyer-search-form" onSubmit={submit}>
         <label htmlFor="buyer-request">What are you looking for?</label>
@@ -79,7 +83,7 @@ export function BuyerSearch() {
             maxLength={500}
             placeholder={BUYER_QUERY_PLACEHOLDER}
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            readOnly
             disabled={state.status === "loading"}
           />
           <button className="button primary" type="submit" disabled={state.status === "loading"}>
@@ -98,7 +102,7 @@ export function BuyerSearch() {
         {state.status === "error" && (
           <div className="inline-status" role="alert">
             <div><strong>{state.timeout ? "Search timed out" : "Search unavailable"}</strong><p>{state.message}</p></div>
-            <button className="button" type="button" onClick={() => void runSearch(query, true)}>Retry</button>
+            <button className="button" type="button" onClick={() => void runSearch(true)}>Retry</button>
           </div>
         )}
         {state.status === "success" && state.result.matches.length === 0 && (
@@ -123,7 +127,10 @@ export function BuyerSearch() {
               <div className="ranked-result-main">
                 <div className="ranked-result-title">
                   <div><strong>{displayListingPrice(match.listing.price)}</strong><h3>{match.listing.title}</h3></div>
-                  <span>{humanize(match.listing.condition)}</span>
+                  <span>
+                    {humanize(match.listing.condition)}
+                    {state.result.query === DEMO_BUYER_QUERY && <> · Size: {DEMO_ASSUMED_SHOE_SIZE}</>}
+                  </span>
                 </div>
                 <p className="fit-explanation">{match.fitExplanation}</p>
                 <div className="grounding-grid">
@@ -131,7 +138,7 @@ export function BuyerSearch() {
                   <div><h4>Uncertainty</h4>{match.assumptions.length ? <ul>{match.assumptions.map((item) => <li key={item.assumptionId}>{humanize(item.field)}: {item.value} <span>({item.confidence})</span></li>)}</ul> : <p>No confidence-labelled assumptions were selected.</p>}</div>
                 </div>
                 <div className="ranked-result-actions">
-                  <span>{match.listing.seller.displayName} · fictional seller</span>
+                  <span>{match.listing.seller.displayName} · Verified seller</span>
                   <Link className="button primary" href={`/listings/${match.listing.listingId}?purchase=review`}>Review to buy</Link>
                 </div>
               </div>

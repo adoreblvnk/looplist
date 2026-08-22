@@ -41,7 +41,7 @@ const money = (atomicAmount: string) => ({
 
 describe("marketplace UI utilities", () => {
   it("uses the Air Force 1 regional resale query as buyer-search guidance", () => {
-    expect(BUYER_QUERY_PLACEHOLDER).toBe("BNIB Air Force 1 under 120 USDC, can nego, MRT meetup, deal today.");
+    expect(BUYER_QUERY_PLACEHOLDER).toBe("Find a BNIB or like-new Air Force under 120 USDC, no damage, can nego.");
   });
 
   it("parses exact six-decimal raw USDC without floats", () => {

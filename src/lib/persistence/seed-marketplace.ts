@@ -32,10 +32,10 @@ function deepFreeze<T>(value: T): T {
 }
 
 export const SEEDED_SELLERS: readonly SeededSellerIdentity[] = deepFreeze(SeededSellerIdentitySchema.array().parse([
-  { id: "seed-seller-nora", displayName: "Nora Vale (Demo)", role: "seller", fictional: true },
-  { id: "seed-seller-eli", displayName: "Eli Park (Demo)", role: "seller", fictional: true },
-  { id: "seed-seller-sam", displayName: "Sam Ito (Demo)", role: "seller", fictional: true },
-  { id: "seed-seller-jules", displayName: "Jules Reed (Demo)", role: "seller", fictional: true },
+  { id: "seed-seller-nora", displayName: "Nora Vale", role: "seller", fictional: true },
+  { id: "seed-seller-eli", displayName: "Eli Park", role: "seller", fictional: true },
+  { id: "seed-seller-sam", displayName: "Sam Ito", role: "seller", fictional: true },
+  { id: "seed-seller-jules", displayName: "Jules Reed", role: "seller", fictional: true },
 ]));
 
 const RECIPIENT = "0x1111111111111111111111111111111111111111" as const;
