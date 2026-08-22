@@ -13,7 +13,7 @@ import {
   type SettlementReceipt,
   type SoldComparable,
 } from "../domain/marketplace";
-import { analysisStartClaimPath, analysisStartConfirmationPath, durableRunPath, publishedListingPath, reconciliationRecordPath, settlementReceiptPath, soldComparablePath } from "./paths";
+import { analysisStartClaimPath, analysisStartConfirmationPath, durableRunPath, publicationRequestPath, publishedListingPath, reconciliationRecordPath, settlementReceiptPath, soldComparablePath } from "./paths";
 import {
   AnalysisStartClaimSchema,
   AnalysisStartConfirmationSchema,
@@ -21,6 +21,8 @@ import {
   MarketplaceListingSchema,
   MAX_SOLD_COMPARABLES,
   PrivateMediaContentSchema,
+  PrivateMediaMetadataSchema,
+  PublicationRequestRecordSchema,
   RepositoryConflictError,
   RepositoryDataError,
   RepositoryNotFoundError,
@@ -32,6 +34,7 @@ import {
   type MarketplaceRepository,
   type PrivateMediaContent,
   type PrivateMediaMetadata,
+  type PublicationRequestRecord,
   type QueuedAnalysisRun,
 } from "./repository";
 
@@ -70,6 +73,7 @@ export class InMemoryMarketplaceRepository implements MarketplaceRepository {
   private readonly runs = new Map<string, DurableRunSnapshot>();
   private readonly analysisStartClaims = new Map<string, AnalysisStartClaim>();
   private readonly analysisStartConfirmations = new Map<string, AnalysisStartConfirmation>();
+  private readonly publicationRequests = new Map<string, PublicationRequestRecord>();
   private readonly receipts = new Map<string, SettlementReceipt>();
   private readonly reconciliations = new Map<string, ReconciliationFailure>();
   private readonly comparables = new Map<string, SoldComparable>();
@@ -167,6 +171,26 @@ export class InMemoryMarketplaceRepository implements MarketplaceRepository {
     return cloneRecord(confirmation);
   }
 
+  async createPublicationRequest(candidate: PublicationRequestRecord): Promise<PublicationRequestRecord> {
+    const request = PublicationRequestRecordSchema.parse(cloneRecord(candidate));
+    publicationRequestPath(request.runId);
+    if (this.publicationRequests.has(request.runId)) throw new RepositoryConflictError();
+    this.publicationRequests.set(request.runId, cloneRecord(request));
+    return PublicationRequestRecordSchema.parse(cloneRecord(request));
+  }
+
+  async readPublicationRequest(runId: string): Promise<PublicationRequestRecord> {
+    publicationRequestPath(runId);
+    if (!this.publicationRequests.has(runId)) throw new RepositoryNotFoundError("Publication request was not found");
+    const request = parseStored(
+      PublicationRequestRecordSchema,
+      this.publicationRequests.get(runId),
+      "Stored publication request failed validation"
+    );
+    if (request.runId !== runId) throw new RepositoryDataError("Stored publication request does not match its path");
+    return cloneRecord(request);
+  }
+
   async publishSellerListing(candidate: ActiveListing): Promise<MarketplaceListing> {
     const listing = ActiveListingSchema.parse(cloneRecord(candidate));
     if (listing.source !== "seller") {
@@ -175,6 +199,14 @@ export class InMemoryMarketplaceRepository implements MarketplaceRepository {
     if (this.listings.has(listing.listingId)) {
       throw new RepositoryConflictError();
     }
+    this.listings.set(listing.listingId, cloneRecord(listing));
+    return this.marketplaceRecord(listing);
+  }
+
+  async createSeedListing(candidate: ActiveListing): Promise<MarketplaceListing> {
+    const listing = ActiveListingSchema.parse(cloneRecord(candidate));
+    if (listing.source !== "seed") throw new TypeError("createSeedListing accepts seed listings only");
+    if (this.listings.has(listing.listingId)) throw new RepositoryConflictError();
     this.listings.set(listing.listingId, cloneRecord(listing));
     return this.marketplaceRecord(listing);
   }
@@ -328,6 +360,17 @@ export class InMemoryMarketplaceRepository implements MarketplaceRepository {
       throw new RepositoryDataError("Stored private media does not match its authoritative reference");
     }
     return cloneRecord(content);
+  }
+
+  async createPrivateMedia(candidate: MediaReference, source: Uint8Array, uploadedAt: string): Promise<PrivateMediaMetadata> {
+    const media = MediaReferenceSchema.parse(cloneRecord(candidate));
+    const content = PrivateMediaContentSchema.parse({
+      metadata: { media, size: source.byteLength, uploadedAt },
+      bytes: new Uint8Array(source),
+    });
+    if (this.media.has(media.pathname)) throw new RepositoryConflictError();
+    this.media.set(media.pathname, cloneRecord(content));
+    return PrivateMediaMetadataSchema.parse(cloneRecord(content.metadata));
   }
 
   private marketplaceRecord(candidate: ActiveListing): MarketplaceListing {

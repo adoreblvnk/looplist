@@ -1,0 +1,1 @@
+import{ListingDetail}from"@/components/marketplace/listing-detail";export default async function Page({params}:{params:Promise<{listingId:string}>}){return <ListingDetail listingId={(await params).listingId}/>}

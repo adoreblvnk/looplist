@@ -25,6 +25,7 @@ import {
   DurableRunPathSchema,
   analysisStartClaimPath,
   analysisStartConfirmationPath,
+  publicationRequestPath,
   PublishedListingPathSchema,
   SoldComparablePathSchema,
   durableRunPath,
@@ -41,6 +42,7 @@ import {
   MAX_SOLD_COMPARABLES,
   PrivateMediaContentSchema,
   PrivateMediaMetadataSchema,
+  PublicationRequestRecordSchema,
   RepositoryConflictError,
   RepositoryDataError,
   RepositoryNotFoundError,
@@ -53,6 +55,7 @@ import {
   type MarketplaceRepository,
   type PrivateMediaContent,
   type PrivateMediaMetadata,
+  type PublicationRequestRecord,
   type QueuedAnalysisRun,
 } from "./repository";
 
@@ -101,7 +104,7 @@ const ProviderErrorShapeSchema = z.object({
 export interface PrivateBlobTransport {
   put(
     pathname: string,
-    body: string,
+    body: string | Uint8Array,
     options: {
       access: "private";
       addRandomSuffix: false;
@@ -116,7 +119,7 @@ export interface PrivateBlobTransport {
 
 export const vercelPrivateBlobTransport: PrivateBlobTransport = {
   async put(pathname, body, options) {
-    return put(pathname, body, options);
+    return put(pathname, typeof body === "string" ? body : Buffer.from(body), options);
   },
   async get(pathname, options) {
     const result = await get(pathname, options);
@@ -258,9 +261,28 @@ export class VercelBlobMarketplaceRepository implements MarketplaceRepository {
     return confirmation;
   }
 
+  async createPublicationRequest(candidate: PublicationRequestRecord): Promise<PublicationRequestRecord> {
+    const request = PublicationRequestRecordSchema.parse(structuredClone(candidate));
+    await this.putJson(publicationRequestPath(request.runId), request, false);
+    return PublicationRequestRecordSchema.parse(structuredClone(request));
+  }
+
+  async readPublicationRequest(runId: string): Promise<PublicationRequestRecord> {
+    const request = await this.readJson(publicationRequestPath(runId), PublicationRequestRecordSchema);
+    if (request.runId !== runId) throw new RepositoryDataError("Stored publication request does not match its path");
+    return request;
+  }
+
   async publishSellerListing(candidate: ActiveListing): Promise<MarketplaceListing> {
     const listing = ActiveListingSchema.parse(structuredClone(candidate));
     if (listing.source !== "seller") throw new TypeError("publishSellerListing accepts seller-created listings only");
+    await this.putJson(publishedListingPath(listing.listingId), listing, false);
+    return MarketplaceListingSchema.parse({ listing, visibility: "active", receiptId: null });
+  }
+
+  async createSeedListing(candidate: ActiveListing): Promise<MarketplaceListing> {
+    const listing = ActiveListingSchema.parse(structuredClone(candidate));
+    if (listing.source !== "seed") throw new TypeError("createSeedListing accepts seed listings only");
     await this.putJson(publishedListingPath(listing.listingId), listing, false);
     return MarketplaceListingSchema.parse({ listing, visibility: "active", receiptId: null });
   }
@@ -573,6 +595,25 @@ export class VercelBlobMarketplaceRepository implements MarketplaceRepository {
     } catch {
       throw new RepositoryDataError("Stored private media content failed validation");
     }
+  }
+
+  async createPrivateMedia(candidate: MediaReference, source: Uint8Array, uploadedAt: string): Promise<PrivateMediaMetadata> {
+    const media = MediaReferenceSchema.parse(structuredClone(candidate));
+    const metadata = PrivateMediaMetadataSchema.parse({ media, size: source.byteLength, uploadedAt });
+    try {
+      const providerResult = await this.transport.put(media.pathname, new Uint8Array(source), {
+        access: "private",
+        addRandomSuffix: false,
+        allowOverwrite: false,
+        contentType: media.mimeType,
+      });
+      const parsedResult = BlobPutResultSchema.safeParse(providerResult);
+      if (!parsedResult.success) throw new RepositoryDataError("Blob provider returned an invalid media write acknowledgement");
+      if (parsedResult.data.pathname !== media.pathname) throw new RepositoryDataError("Blob provider changed a deterministic media pathname");
+    } catch (error) {
+      mapProviderError(error);
+    }
+    return PrivateMediaMetadataSchema.parse(structuredClone(metadata));
   }
 
   private async putJson(pathname: string, value: unknown, allowOverwrite: boolean): Promise<void> {

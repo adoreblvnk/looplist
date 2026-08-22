@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint --max-warnings=0",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "seed:provision": "vitest run --config scripts/provision-seed.vitest.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.45",

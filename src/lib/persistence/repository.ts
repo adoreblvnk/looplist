@@ -2,7 +2,9 @@ import { z } from "zod";
 import {
   ActiveListingSchema,
   AnalysisRunStateSchema,
+  ListingDraftSchema,
   MediaReferenceSchema,
+  MoneySchema,
   PublicationRunStateSchema,
   PurchaseRunStateSchema,
   ReconciliationFailureSchema,
@@ -27,6 +29,23 @@ export const DurableRunSnapshotSchema = z.union([
 ]);
 export type DurableRunSnapshot = z.infer<typeof DurableRunSnapshotSchema>;
 export type QueuedAnalysisRun = Extract<AnalysisRunState, { status: "queued" }>;
+
+export const PublicationRequestRecordSchema = z.object({
+  runId: z.string().min(1).max(64).regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/),
+  listingId: z.string().min(1).max(64).regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/),
+  analysisRunId: z.string().min(1).max(64).regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/),
+  recipientAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
+  network: z.literal("eip155:84532"),
+  sellerApproved: z.literal(true),
+  approvedDraft: ListingDraftSchema,
+  approvedPrice: MoneySchema,
+  requestedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/),
+}).strict().superRefine((request, context) => {
+  if (request.approvedPrice.network !== request.network) {
+    context.addIssue({ code: "custom", path: ["network"], message: "Publication network must match the approved price network" });
+  }
+});
+export type PublicationRequestRecord = z.infer<typeof PublicationRequestRecordSchema>;
 
 export const MarketplaceListingSchema = z
   .object({
@@ -159,7 +178,10 @@ export interface MarketplaceRepository {
   readAnalysisStartClaim(runId: string): Promise<AnalysisStartClaim>;
   createAnalysisStartConfirmation(confirmation: AnalysisStartConfirmation): Promise<AnalysisStartConfirmation>;
   readAnalysisStartConfirmation(runId: string): Promise<AnalysisStartConfirmation>;
+  createPublicationRequest(request: PublicationRequestRecord): Promise<PublicationRequestRecord>;
+  readPublicationRequest(runId: string): Promise<PublicationRequestRecord>;
   publishSellerListing(listing: ActiveListing): Promise<MarketplaceListing>;
+  createSeedListing(listing: ActiveListing): Promise<MarketplaceListing>;
   getListing(listingId: string): Promise<MarketplaceListing>;
   listMarketplaceListings(): Promise<MarketplaceListing[]>;
   /**
@@ -181,6 +203,7 @@ export interface MarketplaceRepository {
   readReconciliationRecord(purchaseId: string, reconciliationId: string): Promise<ReconciliationFailure>;
   readPrivateMediaMetadata(media: MediaReference): Promise<PrivateMediaMetadata>;
   readPrivateMediaContent(media: MediaReference): Promise<PrivateMediaContent>;
+  createPrivateMedia(media: MediaReference, bytes: Uint8Array, uploadedAt: string): Promise<PrivateMediaMetadata>;
 }
 
 export function parseActiveListing(value: unknown): ActiveListing {

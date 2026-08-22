@@ -62,6 +62,10 @@ export function uploadedMediaPath(uploadSessionId: string, mediaId: string, exte
   return `media/uploads/${id(uploadSessionId)}/${id(mediaId)}.${MediaExtensionSchema.parse(extension)}`;
 }
 
+export function publicationRequestPath(runId: string): string {
+  return `records/runs/publication-request/${id(runId)}.json`;
+}
+
 export function parsePrivateMediaReference(value: unknown): MediaReference {
   return MediaReferenceSchema.parse(value);
 }

@@ -13,7 +13,7 @@ import {
 } from "../lib/persistence/repository";
 import { activeListing, comparable, reconciliationFailure, settlementReceipt, validDraft } from "./domain-fixtures";
 
-type Stored = { body: string; contentType: string; uploadedAt: Date };
+type Stored = { body: string | Uint8Array; contentType: string; uploadedAt: Date };
 const UNSET = Symbol("unset");
 
 function stream(bytes: Uint8Array): ReadableStream<Uint8Array> {
@@ -43,7 +43,7 @@ class FakeBlobTransport implements PrivateBlobTransport {
   activeGets = 0;
   maxActiveGets = 0;
 
-  async put(pathname: string, body: string, options: Parameters<PrivateBlobTransport["put"]>[2]) {
+  async put(pathname: string, body: string | Uint8Array, options: Parameters<PrivateBlobTransport["put"]>[2]) {
     this.puts.push({ pathname, options });
     if (this.nextPutError) { const error = this.nextPutError; this.nextPutError = undefined; throw error; }
     if (this.nextPutResult !== UNSET) {
@@ -71,7 +71,7 @@ class FakeBlobTransport implements PrivateBlobTransport {
       }
       const stored = this.stored.get(pathname);
       if (!stored) return null;
-      const bytes = new TextEncoder().encode(stored.body);
+      const bytes = typeof stored.body === "string" ? new TextEncoder().encode(stored.body) : stored.body;
       return { stream: stream(bytes), blob: { pathname, contentType: stored.contentType, size: bytes.byteLength, uploadedAt: stored.uploadedAt } };
     } finally {
       this.activeGets -= 1;
@@ -87,7 +87,8 @@ class FakeBlobTransport implements PrivateBlobTransport {
     }
     const stored = this.stored.get(pathname);
     if (!stored) throw { code: "not_found" };
-    return { pathname, contentType: stored.contentType, size: new TextEncoder().encode(stored.body).byteLength, uploadedAt: stored.uploadedAt };
+    const size = typeof stored.body === "string" ? new TextEncoder().encode(stored.body).byteLength : stored.body.byteLength;
+    return { pathname, contentType: stored.contentType, size, uploadedAt: stored.uploadedAt };
   }
 
   async list(options: { prefix: string; limit: number; cursor?: string }) {
@@ -139,6 +140,29 @@ describe("VercelBlobMarketplaceRepository", () => {
     expect(await repository.readAnalysisStartConfirmation(claim.runId)).toEqual(confirmation);
     await expect(repository.createAnalysisStartClaim(claim)).rejects.toBeInstanceOf(RepositoryConflictError);
     await expect(repository.createAnalysisStartConfirmation(confirmation)).rejects.toBeInstanceOf(RepositoryConflictError);
+  });
+
+  it("stores recipient-bound publication claims at their immutable deterministic path", async () => {
+    const transport = new FakeBlobTransport();
+    const repository = new VercelBlobMarketplaceRepository(transport);
+    const request = {
+      runId: "publication-request-1",
+      listingId: "listing-request-1",
+      analysisRunId: "analysis-request-1",
+      recipientAddress: "0x1111111111111111111111111111111111111111",
+      network: "eip155:84532" as const,
+      sellerApproved: true as const,
+      approvedDraft: structuredClone(validDraft),
+      approvedPrice: { currency: "USDC" as const, network: "eip155:84532" as const, atomicAmount: "1000000" },
+      requestedAt: "2026-08-21T10:00:00.000Z",
+    };
+    await expect(repository.createPublicationRequest(request)).resolves.toEqual(request);
+    expect(transport.puts[0]).toMatchObject({
+      pathname: "records/runs/publication-request/publication-request-1.json",
+      options: { access: "private", addRandomSuffix: false, allowOverwrite: false },
+    });
+    await expect(repository.readPublicationRequest(request.runId)).resolves.toEqual(request);
+    await expect(repository.createPublicationRequest(request)).rejects.toBeInstanceOf(RepositoryConflictError);
   });
 
   it("creates and lists immutable sold comparables with strict path binding and bounds", async () => {
@@ -597,6 +621,33 @@ describe("VercelBlobMarketplaceRepository", () => {
       await expect(storedRepository.readSettlementReceipt(forged.purchaseId)).rejects.toBeInstanceOf(RepositoryDataError);
       await expect(storedRepository.listMarketplaceListings()).rejects.toBeInstanceOf(RepositoryDataError);
     }
+  });
+
+  it("creates immutable private media with deterministic fail-closed Blob options", async () => {
+    const transport = new FakeBlobTransport();
+    const repository = new VercelBlobMarketplaceRepository(transport);
+    const media = validDraft.media[0];
+    const bytes = new Uint8Array([1, 2, 3]);
+    await expect(repository.createPrivateMedia(media, bytes, "2026-08-21T00:00:00.000Z"))
+      .resolves.toMatchObject({ media, size: 3 });
+    expect(transport.puts[0]).toEqual({
+      pathname: media.pathname,
+      options: {
+        access: "private",
+        addRandomSuffix: false,
+        allowOverwrite: false,
+        contentType: media.mimeType,
+      },
+    });
+    expect(transport.stored.get(media.pathname)?.body).toEqual(bytes);
+    await expect(repository.createPrivateMedia(media, bytes, "2026-08-21T00:00:00.000Z"))
+      .rejects.toBeInstanceOf(RepositoryConflictError);
+
+    const malformed = new FakeBlobTransport();
+    malformed.nextPutResult = null;
+    await expect(new VercelBlobMarketplaceRepository(malformed)
+      .createPrivateMedia(media, bytes, "2026-08-21T00:00:00.000Z"))
+      .rejects.toBeInstanceOf(RepositoryDataError);
   });
 
   it("reads private media metadata and bytes through validated references", async () => {
