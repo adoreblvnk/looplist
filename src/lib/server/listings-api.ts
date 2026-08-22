@@ -62,6 +62,7 @@ export const PublicListingSchema = z.object({
   assumptions: z.array(EditableAssumptionSchema),
   price: MoneySchema,
   status: z.enum(["active", "sold"]),
+  canDelete: z.boolean(),
   seller: z.object({ id: IdentifierSchema, displayName: z.string(), fictional: z.literal(true) }).strict(),
   photoIds: z.array(IdentifierSchema).min(3).max(8),
   publishedAt: z.string(),
@@ -94,6 +95,10 @@ function productionReadServices(): Pick<ListingApiServices, "repository"> {
   return { repository: createMarketplaceRepository() };
 }
 
+function productionDeleteServices(): Pick<ListingApiServices, "repository" | "clock"> {
+  return { repository: createMarketplaceRepository(), clock: () => new Date().toISOString() };
+}
+
 function json(value: unknown, status: number): Response {
   return Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
 }
@@ -121,6 +126,7 @@ export function toPublicListing(record: MarketplaceListing): PublicListing {
     assumptions: listing.approvedDraft.assumptions,
     price: listing.approvedPrice,
     status: visibility,
+    canDelete: listing.source === "seller" && visibility === "active",
     seller: {
       id: listing.seller.id,
       displayName: listing.seller.displayName,
@@ -278,6 +284,44 @@ export function createListingGetHandler(servicesFactory: () => Pick<ListingApiSe
       return json(toPublicListing(await servicesFactory().repository.getListing(listingId.data)), 200);
     } catch (cause) {
       if (cause instanceof RepositoryNotFoundError) return failure(404, "listing_not_found", "Listing was not found");
+      if (cause instanceof RepositoryDataError || cause instanceof ZodError) return failure(500, "listing_data_invalid", "Stored listing data is invalid");
+      return failure(503, "listing_unavailable", "Listing service is unavailable");
+    }
+  };
+}
+
+export function createListingDeleteHandler(
+  servicesFactory: () => Pick<ListingApiServices, "repository" | "clock"> = productionDeleteServices
+) {
+  return async function DELETE(_request: Request, context: { params: Promise<{ listingId: string }> }): Promise<Response> {
+    const listingId = IdentifierSchema.safeParse((await context.params).listingId);
+    if (!listingId.success) return failure(404, "listing_not_found", "Listing was not found");
+    try {
+      const services = servicesFactory();
+      const record = await services.repository.getListing(listingId.data);
+      if (record.listing.source !== "seller") {
+        return failure(409, "listing_not_deletable", "Demo marketplace listings cannot be deleted");
+      }
+      if (record.visibility !== "active") {
+        return failure(409, "listing_not_deletable", "Sold listings cannot be deleted");
+      }
+
+      try {
+        await services.repository.readRunSnapshot("purchase", listingId.data);
+        return failure(
+          409,
+          "listing_payment_in_progress",
+          "This listing has a payment attempt and cannot be deleted"
+        );
+      } catch (cause) {
+        if (!(cause instanceof RepositoryNotFoundError)) throw cause;
+      }
+
+      await services.repository.deleteSellerListing(listingId.data, services.clock());
+      return json({ deleted: true, listingId: listingId.data }, 200);
+    } catch (cause) {
+      if (cause instanceof RepositoryNotFoundError) return failure(404, "listing_not_found", "Listing was not found");
+      if (cause instanceof RepositoryConflictError) return failure(409, "listing_not_deletable", "This listing cannot be deleted");
       if (cause instanceof RepositoryDataError || cause instanceof ZodError) return failure(500, "listing_data_invalid", "Stored listing data is invalid");
       return failure(503, "listing_unavailable", "Listing service is unavailable");
     }

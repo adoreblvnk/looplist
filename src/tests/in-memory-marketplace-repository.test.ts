@@ -57,6 +57,22 @@ describe("InMemoryMarketplaceRepository", () => {
     await expect(repository.publishSellerListing(seededListing)).rejects.toThrow();
   });
 
+  it("deletes only active seller listings and protects seed and sold records", async () => {
+    const activeRepository = new InMemoryMarketplaceRepository({ listings: [activeListing] });
+    await activeRepository.deleteSellerListing(activeListing.listingId, "2026-08-21T10:05:00.000Z");
+    await expect(activeRepository.getListing(activeListing.listingId)).rejects.toBeInstanceOf(RepositoryNotFoundError);
+    await expect(activeRepository.publishSellerListing(activeListing)).rejects.toBeInstanceOf(RepositoryConflictError);
+
+    const seedRepository = new InMemoryMarketplaceRepository({ listings: [seededListing] });
+    await expect(seedRepository.deleteSellerListing(seededListing.listingId, "2026-08-21T10:05:00.000Z")).rejects.toBeInstanceOf(RepositoryConflictError);
+    expect((await seedRepository.getListing(seededListing.listingId)).visibility).toBe("active");
+
+    const soldRepository = new InMemoryMarketplaceRepository({ listings: [activeListing] });
+    await soldRepository.createSettlementReceipt(settlementReceipt());
+    await expect(soldRepository.deleteSellerListing(activeListing.listingId, "2026-08-21T10:05:00.000Z")).rejects.toBeInstanceOf(RepositoryConflictError);
+    expect((await soldRepository.getListing(activeListing.listingId)).visibility).toBe("sold");
+  });
+
   it("persists immutable sold comparables with sorted cloned reads and corruption mapping", async () => {
     const second = { ...structuredClone(comparable), comparableId: "comparable-2" };
     const repository = new InMemoryMarketplaceRepository();

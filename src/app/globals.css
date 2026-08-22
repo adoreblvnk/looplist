@@ -118,6 +118,8 @@ p { text-wrap: pretty; }
 .button.primary { border-color: var(--ink); background: var(--ink); color: var(--paper); }
 .button.primary:hover { background: var(--rule); }
 .button.secondary { background: transparent; }
+.button.danger { border-color: oklch(.48 .16 24); background: oklch(.48 .16 24); color: white; }
+.button.danger:hover { border-color: oklch(.4 .15 24); background: oklch(.4 .15 24); }
 .button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
 .status-panel { max-width: 650px; margin: 54px auto; padding: 30px; border: 1px solid var(--hairline); background: var(--paper); text-align: center; }
 .status-panel p { color: var(--ink-muted); }
@@ -181,6 +183,8 @@ p { text-wrap: pretty; }
 .transaction-summary p { margin: 4px 0 0; color: var(--ink-muted); font-size: .77rem; }
 .purchase-review { width: 100%; }
 .transaction-note { margin: 11px 0 0; color: var(--ink-muted); font-size: .72rem; line-height: 1.45; }
+.delete-listing { width: 100%; margin-top: 15px; }
+.delete-error { margin: 0 0 15px; padding: 10px 12px; border: 1px solid oklch(.73 .09 24); background: oklch(.96 .025 24); color: oklch(.38 .13 24); font-size: .76rem; line-height: 1.45; }
 .checkout-boundary { scroll-margin-top: 126px; }
 .checkout-panel, .receipt { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--rule); }
 .checkout-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }

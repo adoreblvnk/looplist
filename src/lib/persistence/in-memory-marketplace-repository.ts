@@ -19,11 +19,12 @@ import {
   type SettlementReceipt,
   type SoldComparable,
 } from "../domain/marketplace";
-import { analysisStartClaimPath, analysisStartConfirmationPath, buyerSearchClaimPath, buyerSearchSelectionPath, durableRunPath, publicationRequestPath, publishedListingPath, reconciliationRecordPath, settlementReceiptPath, soldComparablePath } from "./paths";
+import { analysisStartClaimPath, analysisStartConfirmationPath, buyerSearchClaimPath, buyerSearchSelectionPath, deletedListingPath, durableRunPath, publicationRequestPath, publishedListingPath, reconciliationRecordPath, settlementReceiptPath, soldComparablePath } from "./paths";
 import {
   AnalysisStartClaimSchema,
   AnalysisStartConfirmationSchema,
   DurableRunSnapshotSchema,
+  DeletedListingRecordSchema,
   MarketplaceListingSchema,
   MAX_SOLD_COMPARABLES,
   PrivateMediaContentSchema,
@@ -36,6 +37,7 @@ import {
   type AnalysisStartClaim,
   type AnalysisStartConfirmation,
   type DurableRunSnapshot,
+  type DeletedListingRecord,
   type MarketplaceListing,
   type MarketplaceRepository,
   type PrivateMediaContent,
@@ -77,6 +79,7 @@ function parseStored<T>(schema: z.ZodType<T>, value: unknown, message: string): 
 
 export class InMemoryMarketplaceRepository implements MarketplaceRepository {
   private readonly listings = new Map<string, ActiveListing>();
+  private readonly deletedListings = new Map<string, DeletedListingRecord>();
   private readonly runs = new Map<string, DurableRunSnapshot>();
   private readonly analysisStartClaims = new Map<string, AnalysisStartClaim>();
   private readonly analysisStartConfirmations = new Map<string, AnalysisStartConfirmation>();
@@ -255,7 +258,7 @@ export class InMemoryMarketplaceRepository implements MarketplaceRepository {
     if (listing.source !== "seller") {
       throw new TypeError("publishSellerListing accepts seller-created listings only");
     }
-    if (this.listings.has(listing.listingId)) {
+    if (this.listings.has(listing.listingId) || this.deletedListings.has(listing.listingId)) {
       throw new RepositoryConflictError();
     }
     this.listings.set(listing.listingId, cloneRecord(listing));
@@ -270,8 +273,26 @@ export class InMemoryMarketplaceRepository implements MarketplaceRepository {
     return this.marketplaceRecord(listing);
   }
 
+  async deleteSellerListing(listingId: string, deletedAt: string): Promise<void> {
+    const record = await this.getListing(listingId);
+    if (record.listing.source !== "seller") {
+      throw new RepositoryConflictError("Seed listings cannot be deleted");
+    }
+    if (record.visibility !== "active") {
+      throw new RepositoryConflictError("Sold listings cannot be deleted");
+    }
+    if (this.runs.has(`purchase:${listingId}`)) {
+      throw new RepositoryConflictError("Listings with a purchase attempt cannot be deleted");
+    }
+    const deletion = DeletedListingRecordSchema.parse({ listingId, deletedAt });
+    deletedListingPath(listingId);
+    this.deletedListings.set(listingId, cloneRecord(deletion));
+    this.listings.delete(listingId);
+  }
+
   async getListing(listingId: string): Promise<MarketplaceListing> {
     publishedListingPath(listingId);
+    if (this.deletedListings.has(listingId)) throw new RepositoryNotFoundError("Listing was deleted");
     if (!this.listings.has(listingId)) throw new RepositoryNotFoundError("Listing was not found");
     const stored = this.listings.get(listingId);
     const listing = parseStored(ActiveListingSchema, stored, "Stored listing failed validation");
@@ -283,6 +304,7 @@ export class InMemoryMarketplaceRepository implements MarketplaceRepository {
 
   async listMarketplaceListings(): Promise<MarketplaceListing[]> {
     return [...this.listings.entries()]
+      .filter(([listingId]) => !this.deletedListings.has(listingId))
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([listingId, stored]) => {
         const listing = parseStored(ActiveListingSchema, stored, "Stored listing failed validation");

@@ -2,6 +2,7 @@ import "server-only";
 import {
   BlobNotFoundError,
   BlobPreconditionFailedError,
+  del,
   get,
   head,
   list,
@@ -33,6 +34,7 @@ import {
   analysisStartConfirmationPath,
   buyerSearchClaimPath,
   buyerSearchSelectionPath,
+  deletedListingPath,
   publicationRequestPath,
   PublishedListingPathSchema,
   SoldComparablePathSchema,
@@ -46,6 +48,7 @@ import {
   AnalysisStartClaimSchema,
   AnalysisStartConfirmationSchema,
   DurableRunSnapshotSchema,
+  DeletedListingRecordSchema,
   MarketplaceListingSchema,
   MAX_SOLD_COMPARABLES,
   PrivateMediaContentSchema,
@@ -127,6 +130,7 @@ export interface PrivateBlobTransport {
   get(pathname: string, options: { access: "private"; useCache: false }): Promise<unknown>;
   head(pathname: string): Promise<unknown>;
   list(options: { prefix: string; limit: number; cursor?: string }): Promise<unknown>;
+  del(pathname: string): Promise<void>;
 }
 
 export const vercelPrivateBlobTransport: PrivateBlobTransport = {
@@ -142,6 +146,9 @@ export const vercelPrivateBlobTransport: PrivateBlobTransport = {
   },
   async list(options) {
     return list(options);
+  },
+  async del(pathname) {
+    await del(pathname);
   },
 };
 
@@ -340,6 +347,9 @@ export class VercelBlobMarketplaceRepository implements MarketplaceRepository {
   async publishSellerListing(candidate: ActiveListing): Promise<MarketplaceListing> {
     const listing = ActiveListingSchema.parse(structuredClone(candidate));
     if (listing.source !== "seller") throw new TypeError("publishSellerListing accepts seller-created listings only");
+    if (await this.readDeletedListing(listing.listingId)) {
+      throw new RepositoryConflictError("Deleted listings cannot be republished");
+    }
     await this.putJson(publishedListingPath(listing.listingId), listing, false);
     return MarketplaceListingSchema.parse({ listing, visibility: "active", receiptId: null });
   }
@@ -347,19 +357,47 @@ export class VercelBlobMarketplaceRepository implements MarketplaceRepository {
   async createSeedListing(candidate: ActiveListing): Promise<MarketplaceListing> {
     const listing = this.hydrateListing(ActiveListingSchema.parse(structuredClone(candidate)));
     if (listing.source !== "seed") throw new TypeError("createSeedListing accepts seed listings only");
+    if (await this.readDeletedListing(listing.listingId)) {
+      throw new RepositoryConflictError("Deleted listing IDs cannot be reused");
+    }
     await this.putJson(publishedListingPath(listing.listingId), listing, false);
     return MarketplaceListingSchema.parse({ listing, visibility: "active", receiptId: null });
   }
 
+  async deleteSellerListing(listingId: string, deletedAt: string): Promise<void> {
+    const record = await this.getListing(listingId);
+    if (record.listing.source !== "seller") {
+      throw new RepositoryConflictError("Seed listings cannot be deleted");
+    }
+    if (record.visibility !== "active") {
+      throw new RepositoryConflictError("Sold listings cannot be deleted");
+    }
+    if (await this.readOptionalJson(durableRunPath("purchase", listingId), DurableRunSnapshotSchema)) {
+      throw new RepositoryConflictError("Listings with a purchase attempt cannot be deleted");
+    }
+    const deletion = DeletedListingRecordSchema.parse({ listingId, deletedAt });
+    await this.putJson(deletedListingPath(listingId), deletion, false);
+    try {
+      await this.transport.del(publishedListingPath(listingId));
+    } catch {
+      // The immutable tombstone is authoritative; payload removal is best-effort cleanup.
+    }
+  }
+
   async getListing(listingId: string): Promise<MarketplaceListing> {
     const listing = await this.readJson(publishedListingPath(listingId), ActiveListingSchema);
-    return this.marketplaceListingForStoredListing(listingId, listing);
+    const record = await this.marketplaceListingForStoredListing(listingId, listing);
+    if (!record) throw new RepositoryNotFoundError("Listing was deleted");
+    return record;
   }
 
   private async marketplaceListingForStoredListing(
     requestedListingId: string,
     storedListing: ActiveListing
-  ): Promise<MarketplaceListing> {
+  ): Promise<MarketplaceListing | null> {
+    if (await this.readDeletedListing(requestedListingId)) {
+      return null;
+    }
     const listing = this.hydrateListing(storedListing);
     if (listing.listingId !== requestedListingId) {
       throw new RepositoryDataError("Stored listing does not match its deterministic path");
@@ -430,7 +468,7 @@ export class VercelBlobMarketplaceRepository implements MarketplaceRepository {
       seenCursors.add(cursor);
     } while (cursor);
 
-    return mapWithConcurrency(
+    const records = await mapWithConcurrency(
       pathnames.sort(),
       LISTING_READ_CONCURRENCY,
       async (pathname) => {
@@ -439,6 +477,7 @@ export class VercelBlobMarketplaceRepository implements MarketplaceRepository {
         return this.marketplaceListingForStoredListing(listingId, listing);
       }
     );
+    return records.filter((record): record is MarketplaceListing => record !== null);
   }
 
   /**
@@ -718,6 +757,14 @@ export class VercelBlobMarketplaceRepository implements MarketplaceRepository {
     } catch {
       throw new RepositoryDataError();
     }
+  }
+
+  private async readDeletedListing(listingId: string) {
+    const deletion = await this.readOptionalJson(deletedListingPath(listingId), DeletedListingRecordSchema);
+    if (deletion && deletion.listingId !== listingId) {
+      throw new RepositoryDataError("Stored listing deletion does not match its deterministic path");
+    }
+    return deletion;
   }
 
   private async readOptionalJson<T>(pathname: string, schema: z.ZodType<T>): Promise<T | null> {

@@ -2,20 +2,25 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Checkout } from "./checkout";
 import type { Listing } from "./types";
 import { categoryLabel, displayListingPrice, humanize, publicMediaUrl } from "./utils";
 
 export function ListingDetail({ listingId }: { listingId: string }) {
+  const router = useRouter();
   const [data, setData] = useState<Listing | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState(false);
   const [selected, setSelected] = useState(0);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const galleryDialog = useRef<HTMLDialogElement>(null);
+  const deleteDialog = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -54,6 +59,23 @@ export function ListingDetail({ listingId }: { listingId: string }) {
   const openCheckout = () => {
     setCheckoutOpen(true);
     requestAnimationFrame(() => document.getElementById("checkout")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
+  const deleteListing = async () => {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/listings/${encodeURIComponent(data.listingId)}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+      if (!response.ok) {
+        throw new Error(payload?.error?.message ?? "The listing could not be deleted. Please try again.");
+      }
+      deleteDialog.current?.close();
+      router.replace("/");
+      router.refresh();
+    } catch (cause) {
+      setDeleteError(cause instanceof Error ? cause.message : "The listing could not be deleted. Please try again.");
+      setDeleting(false);
+    }
   };
 
   return (
@@ -109,6 +131,7 @@ export function ListingDetail({ listingId }: { listingId: string }) {
           {!checkoutOpen && <button className="button primary purchase-review" type="button" onClick={openCheckout}>{data.status === "sold" ? "View receipt" : "Review purchase"}</button>}
           <p className="transaction-note">Buyer approval and wallet confirmation are required before any testnet payment.</p>
           {checkoutOpen && <div id="checkout" className="checkout-boundary"><Checkout listingId={data.listingId}/></div>}
+          {data.canDelete && <button className="button danger delete-listing" type="button" onClick={() => { setDeleteError(null); deleteDialog.current?.showModal(); }}>Delete listing</button>}
         </aside>
       </div>
 
@@ -124,6 +147,21 @@ export function ListingDetail({ listingId }: { listingId: string }) {
           </div>
           <div className="gallery-dialog-thumbnails" aria-label="Choose expanded photo">
             {data.photoIds.map((id, index) => <button key={id} type="button" aria-label={`Expand photo ${index + 1}`} aria-pressed={selected === index} onClick={() => setSelected(index)}><img src={publicMediaUrl(data.listingId, id)} alt=""/></button>)}
+          </div>
+        </div>
+      </dialog>
+
+      <dialog ref={deleteDialog} className="wallet-dialog" aria-labelledby="delete-listing-title" onClick={(event) => { if (!deleting && event.target === event.currentTarget) deleteDialog.current?.close(); }}>
+        <div className="wallet-dialog-card">
+          <div className="wallet-dialog-heading">
+            <div><span className="eyebrow">Seller action</span><h2 id="delete-listing-title">Delete this listing?</h2></div>
+            <button className="wallet-dialog-close" type="button" disabled={deleting} onClick={() => deleteDialog.current?.close()} aria-label="Close delete confirmation">×</button>
+          </div>
+          <p>This removes the listing from the marketplace. Sold listings and listings with any payment attempt cannot be deleted.</p>
+          {deleteError && <p className="delete-error" role="alert">{deleteError}</p>}
+          <div className="button-row">
+            <button className="button secondary" type="button" disabled={deleting} onClick={() => deleteDialog.current?.close()}>Keep listing</button>
+            <button className="button danger" type="button" disabled={deleting} onClick={deleteListing}>{deleting ? "Deleting…" : "Delete listing"}</button>
           </div>
         </div>
       </dialog>

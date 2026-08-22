@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PaymentPayload, PaymentRequired, SettleResponse } from "@x402/core/types";
 import { InMemoryMarketplaceRepository } from "../lib/persistence/in-memory-marketplace-repository";
+import { RepositoryNotFoundError } from "../lib/persistence/repository";
 import { PurchaseError, PurchaseService } from "../lib/payment/purchase-service";
 import type { VerifiedX402Payment, X402SettlementGateway } from "../lib/payment/x402-server";
 import type { PurchaseReservation } from "../lib/domain/marketplace";
@@ -11,9 +12,11 @@ const OTHER_BUYER = "0x3333333333333333333333333333333333333333";
 const TX = `0x${"a".repeat(64)}`;
 
 class FakeGateway implements X402SettlementGateway {
+  paymentRequiredCalls = 0;
   verifyError: Error | null = null;
   settleError: Error | null = null;
   paymentRequired(reservation: PurchaseReservation): Promise<{ header: string; body: PaymentRequired }> {
+    this.paymentRequiredCalls += 1;
     return Promise.resolve({ header: "required", body: { x402Version: 2, resource: { url: "https://loop.test" }, accepts: [{ scheme: "exact", network: reservation.amount.network, asset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", amount: reservation.amount.atomicAmount, payTo: reservation.recipientAddress, maxTimeoutSeconds: 300, extra: {} }] } });
   }
   verify(_header: string, reservation: PurchaseReservation): Promise<VerifiedX402Payment> {
@@ -49,6 +52,30 @@ describe("PurchaseService", () => {
     const [first, replay] = await Promise.all([service.reserve(activeListing.listingId, BUYER), service.reserve(activeListing.listingId, BUYER)]);
     expect(replay.reservation).toEqual(first.reservation);
     await expect(service.reserve(activeListing.listingId, OTHER_BUYER)).rejects.toMatchObject({ code: "reservation_conflict", status: 409 });
+  });
+
+  it("does not issue payment terms when deletion wins a concurrent first-reservation race", async () => {
+    const { repository, gateway, service } = harness();
+    const createPurchaseRun = repository.createPurchaseRun.bind(repository);
+    let releaseCreate!: () => void;
+    let signalCreate!: () => void;
+    const createBlocked = new Promise<void>((resolve) => { releaseCreate = resolve; });
+    const createStarted = new Promise<void>((resolve) => { signalCreate = resolve; });
+    repository.createPurchaseRun = async (run) => {
+      signalCreate();
+      await createBlocked;
+      return createPurchaseRun(run);
+    };
+
+    const pendingReservation = service.reserve(activeListing.listingId, BUYER);
+    await createStarted;
+    await repository.deleteSellerListing(activeListing.listingId, "2026-08-21T10:00:00.500Z");
+    releaseCreate();
+    const run = await pendingReservation;
+
+    await expect(service.paymentRequired(run, "https://loop.test"))
+      .rejects.toBeInstanceOf(RepositoryNotFoundError);
+    expect(gateway.paymentRequiredCalls).toBe(0);
   });
 
   it("rejects payment at the exact reservation expiry boundary", async () => {

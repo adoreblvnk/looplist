@@ -19,6 +19,10 @@ export function publishedListingPath(listingId: string): string {
   return `records/listings/${id(listingId)}/published.json`;
 }
 
+export function deletedListingPath(listingId: string): string {
+  return `records/listing-deletions/${id(listingId)}.json`;
+}
+
 export function soldComparablePath(comparableId: string): string {
   return `records/comparables/sold/${id(comparableId)}.json`;
 }

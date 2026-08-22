@@ -30,10 +30,12 @@ class FakeBlobTransport implements PrivateBlobTransport {
   readonly stored = new Map<string, Stored>();
   readonly puts: Array<{ pathname: string; options: Parameters<PrivateBlobTransport["put"]>[2] }> = [];
   readonly gets: Array<{ pathname: string; options: Parameters<PrivateBlobTransport["get"]>[1] }> = [];
+  readonly dels: string[] = [];
   nextPutError: unknown;
   nextGetError: unknown;
   nextHeadError: unknown;
   nextListError: unknown;
+  nextDelError: unknown;
   nextPutResult: unknown | typeof UNSET = UNSET;
   nextGetResult: Awaited<ReturnType<PrivateBlobTransport["get"]>> | undefined;
   nextHeadResult: Awaited<ReturnType<PrivateBlobTransport["head"]>> | undefined;
@@ -98,6 +100,12 @@ class FakeBlobTransport implements PrivateBlobTransport {
     if (this.listResults.length > 0) return this.listResults.shift();
     return { blobs: [...this.stored.keys()].filter((pathname) => pathname.startsWith(options.prefix)).map((pathname) => ({ pathname })), hasMore: false };
   }
+
+  async del(pathname: string) {
+    this.dels.push(pathname);
+    if (this.nextDelError) { const error = this.nextDelError; this.nextDelError = undefined; throw error; }
+    this.stored.delete(pathname);
+  }
 }
 
 describe("VercelBlobMarketplaceRepository", () => {
@@ -110,6 +118,50 @@ describe("VercelBlobMarketplaceRepository", () => {
       options: { access: "private", addRandomSuffix: false, allowOverwrite: false, contentType: "application/json" },
     });
     expect(transport.stored.get(transport.puts[0].pathname)?.body).not.toContain("BLOB_READ_WRITE_TOKEN");
+  });
+
+  it("deletes only an active seller listing at its exact deterministic path", async () => {
+    const transport = new FakeBlobTransport();
+    const repository = new VercelBlobMarketplaceRepository(transport);
+    await repository.publishSellerListing(activeListing);
+
+    await repository.deleteSellerListing(activeListing.listingId, "2026-08-21T10:05:00.000Z");
+
+    expect(transport.dels).toEqual([`records/listings/${activeListing.listingId}/published.json`]);
+    expect(transport.stored.get(`records/listing-deletions/${activeListing.listingId}.json`)?.body)
+      .toContain('"deletedAt":"2026-08-21T10:05:00.000Z"');
+    await expect(repository.getListing(activeListing.listingId)).rejects.toBeInstanceOf(RepositoryNotFoundError);
+    await expect(repository.publishSellerListing(activeListing)).rejects.toBeInstanceOf(RepositoryConflictError);
+  });
+
+  it("keeps a listing logically deleted when Blob payload cleanup fails", async () => {
+    const transport = new FakeBlobTransport();
+    const repository = new VercelBlobMarketplaceRepository(transport);
+    await repository.publishSellerListing(activeListing);
+    transport.nextDelError = new Error("cleanup unavailable");
+
+    await repository.deleteSellerListing(activeListing.listingId, "2026-08-21T10:05:00.000Z");
+
+    expect(transport.stored.has(`records/listings/${activeListing.listingId}/published.json`)).toBe(true);
+    await expect(repository.getListing(activeListing.listingId)).rejects.toBeInstanceOf(RepositoryNotFoundError);
+    await expect(repository.listMarketplaceListings()).resolves.toEqual([]);
+  });
+
+  it("protects seed and sold listings from deletion", async () => {
+    const seedTransport = new FakeBlobTransport();
+    const seedRepository = new VercelBlobMarketplaceRepository(seedTransport);
+    await seedRepository.createSeedListing(SEED_ACTIVE_LISTINGS[0]);
+    await expect(seedRepository.deleteSellerListing(SEED_ACTIVE_LISTINGS[0].listingId, "2026-08-21T10:05:00.000Z"))
+      .rejects.toBeInstanceOf(RepositoryConflictError);
+    expect(seedTransport.dels).toEqual([]);
+
+    const soldTransport = new FakeBlobTransport();
+    const soldRepository = new VercelBlobMarketplaceRepository(soldTransport);
+    await soldRepository.publishSellerListing(activeListing);
+    await soldRepository.createSettlementReceipt(settlementReceipt());
+    await expect(soldRepository.deleteSellerListing(activeListing.listingId, "2026-08-21T10:05:00.000Z"))
+      .rejects.toBeInstanceOf(RepositoryConflictError);
+    expect(soldTransport.dels).toEqual([]);
   });
 
   it("hydrates previously stored seed recipients and legacy prices without changing seller listings", async () => {
@@ -587,7 +639,10 @@ describe("VercelBlobMarketplaceRepository", () => {
     await expect(
       new VercelBlobMarketplaceRepository(transport).listMarketplaceListings()
     ).rejects.toBeInstanceOf(RepositoryDataError);
-    expect(transport.gets.map(({ pathname: requestedPath }) => requestedPath)).toEqual([pathname]);
+    expect(transport.gets.map(({ pathname: requestedPath }) => requestedPath)).toEqual([
+      pathname,
+      `records/listing-deletions/${activeListing.listingId}.json`,
+    ]);
   });
 
   it("rejects malformed pagination flags and cursors", async () => {

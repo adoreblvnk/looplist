@@ -126,11 +126,13 @@ export class PurchaseService {
   }
 
   async paymentRequired(run: PurchaseRunState, resourceUrl: string) {
+    await this.repository.getListing(run.reservation.listingId);
     this.assertPayable(run);
     return this.gateway.paymentRequired(run.reservation, resourceUrl);
   }
 
   async verify(run: PurchaseRunState, paymentHeader: string): Promise<VerifiedX402Payment> {
+    await this.repository.getListing(run.reservation.listingId);
     this.assertPayable(run);
     const verified = await this.gateway.verify(paymentHeader, run.reservation);
     if (run.status === "queued") {

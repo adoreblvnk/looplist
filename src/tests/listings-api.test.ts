@@ -1,15 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { InMemoryMarketplaceRepository } from "../lib/persistence/in-memory-marketplace-repository";
+import { SEED_ACTIVE_LISTINGS } from "../lib/persistence/seed-marketplace";
 import { RepositoryDataError, RepositoryUnavailableError, type MarketplaceRepository } from "../lib/persistence/repository";
 import {
   createListingGetHandler,
+  createListingDeleteHandler,
   createListingMediaGetHandler,
   createListingsGetHandler,
   createListingsPostHandler,
   derivePublicationIdentity,
   type ListingApiServices,
 } from "../lib/server/listings-api";
-import { recommendation, validDraft } from "./domain-fixtures";
+import { activeListing, purchaseReservation, recommendation, settlementReceipt, validDraft } from "./domain-fixtures";
 
 vi.mock("server-only", () => ({}));
 
@@ -167,6 +169,84 @@ describe("seller-approved listing publication and public APIs", () => {
       expect(serialized).not.toContain(forbidden);
     }
     expect(feedPayload.listings[0].price).toEqual({ currency: "USDC", network: "eip155:84532", atomicAmount: "825123456" });
+    expect(feedPayload.listings[0].canDelete).toBe(true);
+  });
+
+  it("deletes a seller-created listing and removes it from detail and feed APIs", async () => {
+    const dependencies = services();
+    await succeeded(dependencies.repository);
+    await createListingsPostHandler(() => dependencies)(request(payload(), "publication-key-delete"));
+    const listingId = (await derivePublicationIdentity("publication-key-delete")).listingId;
+
+    const response = await createListingDeleteHandler(() => dependencies)(
+      new Request(`http://localhost/api/listings/${listingId}`, { method: "DELETE" }),
+      { params: Promise.resolve({ listingId }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ deleted: true, listingId });
+    expect((await createListingGetHandler(() => dependencies)(new Request("http://localhost"), { params: Promise.resolve({ listingId }) })).status).toBe(404);
+    expect(await (await createListingsGetHandler(() => dependencies)()).json()).toEqual({ listings: [] });
+  });
+
+  it("protects seed, sold, and payment-in-progress listings from deletion", async () => {
+    const seed = SEED_ACTIVE_LISTINGS[0];
+    const seedRepository = new InMemoryMarketplaceRepository({ listings: [seed] });
+    const seedResponse = await createListingDeleteHandler(() => services(seedRepository))(
+      new Request("http://localhost", { method: "DELETE" }),
+      { params: Promise.resolve({ listingId: seed.listingId }) }
+    );
+    expect(seedResponse.status).toBe(409);
+    expect((await seedResponse.json()).error.code).toBe("listing_not_deletable");
+
+    const soldRepository = new InMemoryMarketplaceRepository({ listings: [activeListing] });
+    await soldRepository.createSettlementReceipt(settlementReceipt());
+    const soldResponse = await createListingDeleteHandler(() => services(soldRepository))(
+      new Request("http://localhost", { method: "DELETE" }),
+      { params: Promise.resolve({ listingId: activeListing.listingId }) }
+    );
+    expect(soldResponse.status).toBe(409);
+
+    const reservedRepository = new InMemoryMarketplaceRepository({ listings: [activeListing] });
+    await reservedRepository.createPurchaseRun({
+      runId: activeListing.listingId,
+      kind: "purchase",
+      status: "queued",
+      reservation: purchaseReservation(),
+      listingTitle: activeListing.approvedDraft.title,
+      seller: activeListing.seller,
+      createdAt: "2026-08-21T10:01:00.000Z",
+      updatedAt: "2026-08-21T10:01:00.000Z",
+      attempt: 0,
+    });
+    const reservedResponse = await createListingDeleteHandler(() => services(reservedRepository))(
+      new Request("http://localhost", { method: "DELETE" }),
+      { params: Promise.resolve({ listingId: activeListing.listingId }) }
+    );
+    expect(reservedResponse.status).toBe(409);
+    expect((await reservedResponse.json()).error.code).toBe("listing_payment_in_progress");
+  });
+
+  it("blocks deletion after an expired queued reservation to avoid a facilitator-verification race", async () => {
+    const repository = new InMemoryMarketplaceRepository({ listings: [activeListing] });
+    await repository.createPurchaseRun({
+      runId: activeListing.listingId,
+      kind: "purchase",
+      status: "queued",
+      reservation: purchaseReservation(),
+      listingTitle: activeListing.approvedDraft.title,
+      seller: activeListing.seller,
+      createdAt: "2026-08-21T10:01:00.000Z",
+      updatedAt: "2026-08-21T10:01:00.000Z",
+      attempt: 0,
+    });
+    const response = await createListingDeleteHandler(() => services(repository))(
+      new Request("http://localhost", { method: "DELETE" }),
+      { params: Promise.resolve({ listingId: activeListing.listingId }) }
+    );
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe("listing_payment_in_progress");
+    await expect(repository.getListing(activeListing.listingId)).resolves.toBeDefined();
   });
 
   it("streams only media belonging to the listing with fixed private headers", async () => {

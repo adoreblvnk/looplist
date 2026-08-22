@@ -55,6 +55,12 @@ export const PublicationRequestRecordSchema = z.object({
 });
 export type PublicationRequestRecord = z.infer<typeof PublicationRequestRecordSchema>;
 
+export const DeletedListingRecordSchema = z.object({
+  listingId: z.string().min(1).max(64).regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/),
+  deletedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/),
+}).strict();
+export type DeletedListingRecord = z.infer<typeof DeletedListingRecordSchema>;
+
 export const MarketplaceListingSchema = z
   .object({
     listing: ActiveListingSchema,
@@ -196,6 +202,8 @@ export interface MarketplaceRepository {
   readBuyerSearchSelection(searchId: string): Promise<BuyerSearchSelectionRecord>;
   publishSellerListing(listing: ActiveListing): Promise<MarketplaceListing>;
   createSeedListing(listing: ActiveListing): Promise<MarketplaceListing>;
+  /** Durably removes only an active seller-created listing from the public marketplace. */
+  deleteSellerListing(listingId: string, deletedAt: string): Promise<void>;
   getListing(listingId: string): Promise<MarketplaceListing>;
   listMarketplaceListings(): Promise<MarketplaceListing[]>;
   /**
