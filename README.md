@@ -1,43 +1,48 @@
 # LoopList
 
-LoopList turns photos of a used item into an approved, published, and verified eBay listing.
+LoopList turns three to eight item photos into an editable, verified eBay-compatible listing. Gemini 3.6 Flash identifies the item, records visible defects, suggests prices, and asks only for unresolved seller details. Publication starts only after explicit seller approval.
+
+Built for the [Build with Gemini Hackathon 2026](https://luma.com/deepmind-v4ci), Most Creative Gemini Hack track.
 
 ## Stack
 
-- Next.js 16 (App Router)
-- AI SDK 7 `WorkflowAgent` and Vercel Workflows (`workflow` 4.8.3, `@ai-sdk/workflow` 1.0.69)
-- Gemini 3.6 Flash through `@ai-sdk/google`
-- Vercel Blob for private image storage, draft/final workflow records, eBay adapter records, and versioned repair skill artifacts
-- Deterministic eBay Sandbox adapter boundary
+- Next.js 16 and React 19
+- AI SDK 7 `WorkflowAgent` with Gemini 3.6 Flash
+- Vercel Workflow for durable analysis and publication runs
+- Private Vercel Blob storage for photos, drafts, adapter records, and repair skills
+- Deterministic eBay-compatible adapter until Sandbox credentials are available
 
-## API Endpoints
+Gemini, Blob, and Workflow are required live paths. The app reports failures instead of substituting fixtures or mocks. Only the eBay boundary uses a temporary adapter.
 
-- `POST /api/upload`: Raw image binary upload contract. Requires numeric `Content-Length` (> 0 and <= 4 MiB) and allowed `Content-Type` (`image/jpeg`, `image/png`, `image/webp`). Verifies PNG/JPEG/WebP magic bytes.
-- `GET /api/images?path=...`: Public preview image endpoint accepting only upload-scoped image pathnames (`uploads/*.jpg|.png|.webp`).
-- `POST /api/analyze`: Triggers analysis workflow on 3–8 upload image paths.
-- `GET /api/analyze/[runId]`: Polls analysis workflow status and typed result DTO.
-- `POST /api/publish`: Triggers publication workflow with explicit seller approval (`approved: true`).
-- `GET /api/publish/[runId]`: Polls publish workflow status and typed result DTO.
+## Local development
 
-## Setup
+Create `.env` or `.env.local` with:
+
+```dotenv
+GOOGLE_GENERATIVE_AI_API_KEY=
+BLOB_READ_WRITE_TOKEN=
+```
+
+Then run:
 
 ```bash
-cp .env.example .env.local
 npm install
 npm run dev
 ```
 
-In `.env.local`, configure your live `GOOGLE_GENERATIVE_AI_API_KEY` and `BLOB_READ_WRITE_TOKEN`.
-Gemini, Blob, and Workflow are live required execution paths.
-When live eBay credentials are absent, the eBay listing boundary operates in deterministic adapter mode with identical publish, retrieve, verify, and repair semantics. Never commit `.env.local`.
+Open `http://localhost:3000` for the landing page and `http://localhost:3000/demo` for the complete seller flow.
 
-## Local Verification Commands
+## Verification
 
 ```bash
-npm run test    # Pure-function unit tests for schemas, path scoping, magic bytes, eBay validation, approval rejection, adapter identity, and repair control
-npm run lint    # ESLint
-npm run build   # Next.js build
-npm audit       # Dependency security audit
+npm test
+npm run lint
+npm run build
+npm audit
 ```
 
-See `PROJECT_CONTEXT.md` for product scope and vertical slice boundaries.
+The seeded Game Boy item still uses the live Blob, Gemini, and Workflow path. The final receipt is clearly marked as an eBay-compatible demo-adapter result and can be restored from its workflow ID until the workspace is reset.
+
+## Deployment boundary
+
+The repository is linked to a Vercel project and a private Blob store. No Production deployment is created by this project setup.

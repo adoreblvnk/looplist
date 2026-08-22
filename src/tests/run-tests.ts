@@ -35,6 +35,11 @@ import {
   getMutatedPaths,
   isPathPermitted,
 } from "../lib/domain/repair-controller";
+import {
+  MAX_JSON_BODY_BYTES,
+  readBoundedJson,
+  RequestJsonError,
+} from "../lib/server/request-json";
 
 const validSampleListing: EbayListing = {
   title: "Nintendo Game Boy DMG-01 Classic Grey Console - Tested Working",
@@ -388,4 +393,33 @@ test("13. Skill Metadata Only Emerges After Valid Repair Tests", async () => {
   assert.notStrictEqual(repairedResult.repairMetadata, null);
   assert.strictEqual(repairedResult.repairMetadata?.attemptNumber, 1);
   assert.strictEqual(repairedResult.repairMetadata?.repairedListing.title, "Nintendo Game Boy DMG-01 Classic Grey Console");
+});
+
+test("14. Bounded JSON Request Body Tests", async () => {
+  const validRequest = new Request("http://localhost/api/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ imagePaths: [] }),
+  });
+  assert.deepStrictEqual(await readBoundedJson(validRequest), { imagePaths: [] });
+
+  const wrongContentType = new Request("http://localhost/api/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: "{}",
+  });
+  await assert.rejects(
+    () => readBoundedJson(wrongContentType),
+    (error: unknown) => error instanceof RequestJsonError && error.status === 415
+  );
+
+  const oversizedRequest = new Request("http://localhost/api/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value: "a".repeat(MAX_JSON_BODY_BYTES) }),
+  });
+  await assert.rejects(
+    () => readBoundedJson(oversizedRequest),
+    (error: unknown) => error instanceof RequestJsonError && error.status === 413
+  );
 });
