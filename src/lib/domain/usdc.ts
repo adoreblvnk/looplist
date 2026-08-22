@@ -3,6 +3,7 @@ import { z } from "zod";
 export const USDC_DECIMALS = 6;
 export const MAX_USDC_WHOLE_DIGITS = 12;
 export const MAX_USDC_ATOMIC_DIGITS = MAX_USDC_WHOLE_DIGITS + USDC_DECIMALS;
+export const DEMO_USDC_PRICE_DIVISOR = BigInt(1_000);
 
 const canonicalAtomicPattern = /^(0|[1-9]\d*)$/;
 const canonicalDecimalPattern = new RegExp(
@@ -41,4 +42,14 @@ export function formatUsdcAmount(input: unknown): string {
   const whole = padded.slice(0, -USDC_DECIMALS);
   const fractional = padded.slice(-USDC_DECIMALS);
   return `${whole}.${fractional}`;
+}
+
+/** Scales a positive canonical test-USDC amount without floats or rounding. */
+export function scaleDemoUsdcAmount(input: unknown): UsdcAtomicAmount {
+  const atomic = UsdcAtomicAmountSchema.parse(input);
+  const value = BigInt(atomic);
+  if (value <= BigInt(0) || value % DEMO_USDC_PRICE_DIVISOR !== BigInt(0)) {
+    throw new RangeError(`Demo USDC amount must be positive and exactly divisible by ${DEMO_USDC_PRICE_DIVISOR}`);
+  }
+  return UsdcAtomicAmountSchema.parse((value / DEMO_USDC_PRICE_DIVISOR).toString());
 }

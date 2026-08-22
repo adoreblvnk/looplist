@@ -10,6 +10,7 @@ import {
   type SeededSellerIdentity,
   type SoldComparable,
 } from "../domain/marketplace";
+import { scaleDemoUsdcAmount } from "../domain/usdc";
 import { seedMediaPath } from "./paths";
 import { MAX_SOLD_COMPARABLES, type MarketplaceRepository } from "./repository";
 
@@ -108,7 +109,11 @@ function listing(input: SeedListingInput): ActiveListing {
         },
       ],
     },
-    approvedPrice: { currency: "USDC", network: "eip155:84532", atomicAmount: input.atomicAmount },
+    approvedPrice: {
+      currency: "USDC",
+      network: "eip155:84532",
+      atomicAmount: scaleDemoUsdcAmount(input.atomicAmount),
+    },
     publishedAt: PUBLISHED_AT,
     lastReconciliationFailure: null,
     state: "active",
@@ -347,7 +352,11 @@ function comparable(
     includedAccessories: [],
     similarityScore,
     similarityReason,
-    soldPrice: { currency: "USDC", network: "eip155:84532", atomicAmount },
+    soldPrice: {
+      currency: "USDC",
+      network: "eip155:84532",
+      atomicAmount: scaleDemoUsdcAmount(atomicAmount),
+    },
     soldAt,
   });
 }

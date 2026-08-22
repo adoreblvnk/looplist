@@ -58,6 +58,34 @@ describe("PurchaseService", () => {
     await expect(service.paymentRequired(run, "https://loop.test")).rejects.toMatchObject({ code: "reservation_expired" });
   });
 
+  it("replaces an expired unsigned reservation and projects the listing as active again", async () => {
+    const { service, setNow } = harness();
+    const first = await service.reserve(activeListing.listingId, BUYER);
+    setNow(first.reservation.expiresAt);
+
+    await expect(service.checkout(activeListing.listingId)).resolves.toMatchObject({
+      status: "active",
+      reservationExpiresAt: null,
+    });
+    const replacement = await service.reserve(activeListing.listingId, OTHER_BUYER);
+    expect(replacement).toMatchObject({ status: "queued", reservation: { buyerAddress: OTHER_BUYER } });
+    expect(replacement.reservation.createdAt).toBe(first.reservation.expiresAt);
+    expect(Date.parse(replacement.reservation.expiresAt)).toBeGreaterThan(Date.parse(first.reservation.expiresAt));
+    await expect(service.readRun(activeListing.listingId)).resolves.toEqual(replacement);
+  });
+
+  it("does not replace an expired reservation after its signature was verified", async () => {
+    const { service, setNow } = harness();
+    const queued = await service.reserve(activeListing.listingId, BUYER);
+    await service.verify(queued, "signed");
+    setNow(queued.reservation.expiresAt);
+
+    await expect(service.reserve(activeListing.listingId, OTHER_BUYER)).rejects.toMatchObject({
+      code: "purchase_not_payable",
+      status: 409,
+    });
+  });
+
   it("settles once, finalizes an immutable receipt, and makes the listing sold", async () => {
     const { service, repository, setNow } = harness();
     const queued = await service.reserve(activeListing.listingId, BUYER);

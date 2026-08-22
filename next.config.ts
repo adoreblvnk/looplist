@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 import { withWorkflow } from "workflow/next";
 
+const isDevelopment = process.env.NODE_ENV === "development";
+const scriptSource = `script-src 'self' 'unsafe-inline'${isDevelopment ? " 'unsafe-eval'" : ""}`;
 const connectSource = "connect-src 'self' https://sepolia.base.org https://rpc.wallet.coinbase.com https://cca-lite.coinbase.com https://www.walletlink.org wss://www.walletlink.org";
 
 const nextConfig: NextConfig = {
@@ -14,7 +16,7 @@ const nextConfig: NextConfig = {
     return [{
       source: "/:path*",
       headers: [
-        { key: "Content-Security-Policy", value: `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; ${connectSource}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` },
+        { key: "Content-Security-Policy", value: `default-src 'self'; ${scriptSource}; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; ${connectSource}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` },
         { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
         { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
         { key: "X-Content-Type-Options", value: "nosniff" },

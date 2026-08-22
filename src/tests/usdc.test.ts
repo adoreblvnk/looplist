@@ -3,6 +3,7 @@ import {
   UsdcAtomicAmountSchema,
   formatUsdcAmount,
   parseUsdcAmount,
+  scaleDemoUsdcAmount,
 } from "../lib/domain/usdc";
 
 describe("exact USDC helpers", () => {
@@ -49,4 +50,11 @@ describe("exact USDC helpers", () => {
       expect(() => formatUsdcAmount(atomic)).toThrow();
     }
   );
+
+  it("scales demo prices exactly by 1,000 without floating-point arithmetic", () => {
+    expect(scaleDemoUsdcAmount("100000000")).toBe("100000");
+    expect(scaleDemoUsdcAmount("825000000")).toBe("825000");
+    expect(() => scaleDemoUsdcAmount("100000001")).toThrow(RangeError);
+    expect(() => scaleDemoUsdcAmount("0")).toThrow(RangeError);
+  });
 });

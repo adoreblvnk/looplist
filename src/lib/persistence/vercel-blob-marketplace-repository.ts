@@ -56,6 +56,9 @@ import {
   RepositoryNotFoundError,
   RepositoryUnavailableError,
   assertReceiptMatchesPublishedActiveListing,
+  bindSeedListingRecipient,
+  normalizeDemoListingPrice,
+  normalizeSeedComparablePrice,
   type AnalysisStartClaim,
   type AnalysisStartConfirmation,
   type DurableRunSnapshot,
@@ -241,7 +244,16 @@ function encodeJson(value: unknown): string {
 }
 
 export class VercelBlobMarketplaceRepository implements MarketplaceRepository {
-  constructor(private readonly transport: PrivateBlobTransport = vercelPrivateBlobTransport) {}
+  constructor(
+    private readonly transport: PrivateBlobTransport = vercelPrivateBlobTransport,
+    private readonly seedRecipientAddress?: string,
+  ) {}
+
+  private hydrateListing(listing: ActiveListing): ActiveListing {
+    const normalized = normalizeDemoListingPrice(listing);
+    if (normalized.source !== "seed" || !this.seedRecipientAddress) return normalized;
+    return bindSeedListingRecipient(normalized, this.seedRecipientAddress);
+  }
 
   async createAnalysisRun(candidate: QueuedAnalysisRun): Promise<QueuedAnalysisRun> {
     const run = DurableRunSnapshotSchema.parse(structuredClone(candidate));
@@ -333,7 +345,7 @@ export class VercelBlobMarketplaceRepository implements MarketplaceRepository {
   }
 
   async createSeedListing(candidate: ActiveListing): Promise<MarketplaceListing> {
-    const listing = ActiveListingSchema.parse(structuredClone(candidate));
+    const listing = this.hydrateListing(ActiveListingSchema.parse(structuredClone(candidate)));
     if (listing.source !== "seed") throw new TypeError("createSeedListing accepts seed listings only");
     await this.putJson(publishedListingPath(listing.listingId), listing, false);
     return MarketplaceListingSchema.parse({ listing, visibility: "active", receiptId: null });
@@ -346,8 +358,9 @@ export class VercelBlobMarketplaceRepository implements MarketplaceRepository {
 
   private async marketplaceListingForStoredListing(
     requestedListingId: string,
-    listing: ActiveListing
+    storedListing: ActiveListing
   ): Promise<MarketplaceListing> {
+    const listing = this.hydrateListing(storedListing);
     if (listing.listingId !== requestedListingId) {
       throw new RepositoryDataError("Stored listing does not match its deterministic path");
     }
@@ -454,7 +467,7 @@ export class VercelBlobMarketplaceRepository implements MarketplaceRepository {
         if (comparable.comparableId !== comparableId) {
           throw new RepositoryDataError("Stored sold comparable does not match its deterministic path");
         }
-        return SoldComparableSchema.parse(structuredClone(comparable));
+        return normalizeSeedComparablePrice(comparable);
       }
     );
   }
@@ -535,7 +548,9 @@ export class VercelBlobMarketplaceRepository implements MarketplaceRepository {
 
   async createSettlementReceipt(candidate: SettlementReceipt): Promise<SettlementReceipt> {
     const receipt = SettlementReceiptSchema.parse(structuredClone(candidate));
-    const published = await this.readJson(publishedListingPath(receipt.listingId), ActiveListingSchema);
+    const published = this.hydrateListing(
+      await this.readJson(publishedListingPath(receipt.listingId), ActiveListingSchema)
+    );
     if (published.listingId !== receipt.listingId) {
       throw new RepositoryDataError("Stored published listing does not match its deterministic path");
     }
@@ -553,7 +568,9 @@ export class VercelBlobMarketplaceRepository implements MarketplaceRepository {
     const listingId = purchaseId.slice("purchase:".length);
     let listing: ActiveListing;
     try {
-      listing = await this.readJson(publishedListingPath(listingId), ActiveListingSchema);
+      listing = this.hydrateListing(
+        await this.readJson(publishedListingPath(listingId), ActiveListingSchema)
+      );
     } catch (error) {
       if (error instanceof RepositoryNotFoundError) {
         throw new RepositoryDataError("Stored settlement receipt has no published listing");

@@ -102,15 +102,24 @@ export class PurchaseService {
     } catch (error) {
       if (!(error instanceof RepositoryConflictError)) throw error;
       const existing = await this.readRun(listingId);
+      const expired = Date.parse(createdAt) >= Date.parse(existing.reservation.expiresAt);
+      if (expired) {
+        if (existing.status !== "queued") {
+          throw new PurchaseError("purchase_not_payable", 409, "Purchase is not payable");
+        }
+        await this.repository.saveRunSnapshot(queued);
+        const replacement = await this.readRun(listingId);
+        if (!equal(replacement, queued)) {
+          throw new PurchaseError("reservation_conflict", 409, "Another buyer already reserved this listing");
+        }
+        return replacement;
+      }
       const sameTerms = existing.reservation.buyerAddress.toLowerCase() === buyer.toLowerCase() &&
         existing.reservation.recipientAddress.toLowerCase() === listing.recipientAddress.toLowerCase() &&
         equal(existing.reservation.amount, listing.approvedPrice) &&
         existing.listingTitle === listing.approvedDraft.title;
       if (!sameTerms) {
         throw new PurchaseError("reservation_conflict", 409, "Another buyer already reserved this listing");
-      }
-      if (Date.parse(this.clock()) >= Date.parse(existing.reservation.expiresAt)) {
-        throw new PurchaseError("reservation_expired", 409, "The reservation expired; this payment was not authorized");
       }
       return existing;
     }
@@ -230,6 +239,9 @@ export class PurchaseService {
 
   private snapshotFromRun(listing: Awaited<ReturnType<MarketplaceRepository["getListing"]>>["listing"], run: PurchaseRunState): CheckoutSnapshot {
     if (run.status === "succeeded") return this.snapshot(listing, "sold", run.reservation.expiresAt, run.receipt);
+    if (run.status === "queued" && Date.parse(this.clock()) >= Date.parse(run.reservation.expiresAt)) {
+      return this.snapshot(listing, "active", null, null);
+    }
     const status = run.status === "settlement_pending" ? "settlement_pending" :
       run.status === "reconciliation_failed" ? "reconciliation_failed" : "payment_pending";
     return this.snapshot(listing, status, run.reservation.expiresAt, null);

@@ -5,6 +5,7 @@ import { SEED_MEDIA_MANIFEST, resolveSeedMediaSourcePath } from "./seed-media-ma
 import {
   RepositoryConflictError,
   RepositoryNotFoundError,
+  bindSeedListingRecipient,
   type MarketplaceRepository,
 } from "./repository";
 
@@ -25,15 +26,19 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
 export async function provisionSeedMarketplace(
   repository: MarketplaceRepository,
   options: {
+    recipientAddress: string;
     readSource?: (absolutePath: string) => Promise<Uint8Array>;
     uploadedAt?: string;
-  } = {}
+  }
 ): Promise<SeedProvisioningResult> {
   const readSource = options.readSource ?? (async (absolutePath) => new Uint8Array(await readFile(absolutePath)));
   const uploadedAt = options.uploadedAt ?? "2026-08-20T12:00:00.000Z";
+  const seedListings = SEED_ACTIVE_LISTINGS.map((listing) =>
+    bindSeedListingRecipient(listing, options.recipientAddress)
+  );
   let mediaCount = 0;
 
-  for (const listing of SEED_ACTIVE_LISTINGS) {
+  for (const listing of seedListings) {
     for (const media of listing.approvedDraft.media) {
       const manifest = SEED_MEDIA_MANIFEST[media.pathname];
       if (!manifest) throw new Error(`Missing canonical seed media manifest entry for ${media.pathname}`);
@@ -51,7 +56,7 @@ export async function provisionSeedMarketplace(
     }
   }
 
-  for (const listing of SEED_ACTIVE_LISTINGS) {
+  for (const listing of seedListings) {
     try {
       await repository.createSeedListing(listing);
     } catch (cause) {
@@ -93,7 +98,7 @@ export async function provisionSeedMarketplace(
 
   return {
     media: mediaCount,
-    listings: SEED_ACTIVE_LISTINGS.length,
+    listings: seedListings.length,
     soldComparables: SEED_SOLD_COMPARABLES.length,
   };
 }

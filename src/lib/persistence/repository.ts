@@ -25,6 +25,7 @@ import {
   type SettlementReceipt,
   type SoldComparable,
 } from "../domain/marketplace";
+import { scaleDemoUsdcAmount } from "../domain/usdc";
 
 export const MAX_SOLD_COMPARABLES = 100;
 
@@ -221,6 +222,49 @@ export interface MarketplaceRepository {
 
 export function parseActiveListing(value: unknown): ActiveListing {
   return ActiveListingSchema.parse(value);
+}
+const ONE_USDC_ATOMIC = BigInt(1_000_000);
+export const DEMO_PRICE_SCALE_CUTOVER = "2026-08-22T03:25:00.000Z";
+
+/** Normalizes seed records and pre-cutover seller demos without rewriting immutable Blob objects. */
+export function normalizeDemoListingPrice(listing: ActiveListing): ActiveListing {
+  const isLegacySellerDemo = listing.source === "seller" &&
+    listing.listingId.startsWith("listing_") &&
+    Date.parse(listing.publishedAt) < Date.parse(DEMO_PRICE_SCALE_CUTOVER);
+  if ((listing.source !== "seed" && !isLegacySellerDemo) ||
+      BigInt(listing.approvedPrice.atomicAmount) < ONE_USDC_ATOMIC) {
+    return ActiveListingSchema.parse(structuredClone(listing));
+  }
+  return ActiveListingSchema.parse({
+    ...structuredClone(listing),
+    approvedPrice: {
+      ...listing.approvedPrice,
+      atomicAmount: scaleDemoUsdcAmount(listing.approvedPrice.atomicAmount),
+    },
+  });
+}
+
+/** Normalizes sold comparables provisioned before demo prices were scaled by 1:1,000. */
+export function normalizeSeedComparablePrice(comparable: SoldComparable): SoldComparable {
+  if (!comparable.comparableId.startsWith("sold-") ||
+      BigInt(comparable.soldPrice.atomicAmount) < ONE_USDC_ATOMIC) {
+    return SoldComparableSchema.parse(structuredClone(comparable));
+  }
+  return SoldComparableSchema.parse({
+    ...structuredClone(comparable),
+    soldPrice: {
+      ...comparable.soldPrice,
+      atomicAmount: scaleDemoUsdcAmount(comparable.soldPrice.atomicAmount),
+    },
+  });
+}
+
+export function bindSeedListingRecipient(listing: ActiveListing, recipientAddress: string): ActiveListing {
+  if (listing.source !== "seed") throw new TypeError("Only seed listings can use a configured seed recipient");
+  return ActiveListingSchema.parse({
+    ...normalizeDemoListingPrice(listing),
+    recipientAddress,
+  });
 }
 export function parseRunSnapshot(value: unknown): DurableRunSnapshot {
   return DurableRunSnapshotSchema.parse(value);

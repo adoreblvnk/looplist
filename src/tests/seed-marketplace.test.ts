@@ -142,16 +142,34 @@ describe("deterministic marketplace seed corpus", () => {
   });
 
   it("uses exact Base Sepolia USDC prices and evidence tied to listing photos", () => {
+    const expectedPrices = new Map([
+      ["seed-macbook-air-m2-512", "825000"],
+      ["seed-switch-oled-white", "285000"],
+      ["seed-sony-wh1000xm5-black", "245000"],
+      ["seed-pixel-8-blue", "390000"],
+      ["seed-asics-kayano-30", "105000"],
+      ["seed-nike-pegasus-40", "78000"],
+      ["seed-brooks-ghost-15", "82000"],
+      ["seed-newbalance-1080v13", "118000"],
+      ["seed-nike-air-force-1-07-white", "115000"],
+      ["seed-nike-air-force-1-miami-double-hook", "135000"],
+    ]);
     const prices = new Set<string>();
     for (const listing of SEED_ACTIVE_LISTINGS) {
       expect(listing.approvedPrice).toMatchObject({ currency: "USDC", network: "eip155:84532" });
-      expect(listing.approvedPrice.atomicAmount).toMatch(/^[1-9]\d*$/);
+      expect(listing.approvedPrice.atomicAmount).toBe(expectedPrices.get(listing.listingId));
+      expect(BigInt(listing.approvedPrice.atomicAmount)).toBeLessThan(BigInt(1_000_000));
       prices.add(listing.approvedPrice.atomicAmount);
       const photoIds = new Set(listing.approvedDraft.media.map(({ id }) => id));
       expect(listing.approvedDraft.evidence.every(({ photoId }) => photoIds.has(photoId))).toBe(true);
       expect(listing.approvedDraft.evidence.some(({ kind }) => kind === "condition")).toBe(true);
     }
     expect(prices.size).toBe(10);
+  });
+
+  it("scales every seeded sold comparable into faucet-sized exact test USDC", () => {
+    expect(SEED_SOLD_COMPARABLES[0].soldPrice.atomicAmount).toBe("790000");
+    expect(SEED_SOLD_COMPARABLES.every(({ soldPrice }) => BigInt(soldPrice.atomicAmount) < BigInt(1_000_000))).toBe(true);
   });
 
   it("seeds sold comparables only through the immutable repository operation", async () => {

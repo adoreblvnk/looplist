@@ -12,6 +12,7 @@ import {
   MAX_SOLD_COMPARABLES,
 } from "../lib/persistence/repository";
 import { activeListing, comparable, reconciliationFailure, settlementReceipt, validDraft } from "./domain-fixtures";
+import { SEED_ACTIVE_LISTINGS, SEED_SOLD_COMPARABLES } from "../lib/persistence/seed-marketplace";
 
 type Stored = { body: string | Uint8Array; contentType: string; uploadedAt: Date };
 const UNSET = Symbol("unset");
@@ -109,6 +110,65 @@ describe("VercelBlobMarketplaceRepository", () => {
       options: { access: "private", addRandomSuffix: false, allowOverwrite: false, contentType: "application/json" },
     });
     expect(transport.stored.get(transport.puts[0].pathname)?.body).not.toContain("BLOB_READ_WRITE_TOKEN");
+  });
+
+  it("hydrates previously stored seed recipients and legacy prices without changing seller listings", async () => {
+    const transport = new FakeBlobTransport();
+    const storedSeed = SEED_ACTIVE_LISTINGS[0];
+    await new VercelBlobMarketplaceRepository(transport).createSeedListing(storedSeed);
+    const seedPath = `records/listings/${storedSeed.listingId}/published.json`;
+    const seedObject = transport.stored.get(seedPath)!;
+    const legacySeed = structuredClone(storedSeed);
+    legacySeed.approvedPrice.atomicAmount = (BigInt(storedSeed.approvedPrice.atomicAmount) * BigInt(1_000)).toString();
+    transport.stored.set(seedPath, { ...seedObject, body: JSON.stringify(legacySeed) });
+    await new VercelBlobMarketplaceRepository(transport).publishSellerListing(activeListing);
+    const configuredRecipient = "0x9999999999999999999999999999999999999999";
+    const repository = new VercelBlobMarketplaceRepository(transport, configuredRecipient);
+
+    expect((await repository.getListing(storedSeed.listingId)).listing).toMatchObject({
+      recipientAddress: configuredRecipient,
+      approvedPrice: { atomicAmount: storedSeed.approvedPrice.atomicAmount },
+    });
+    expect((await repository.getListing(activeListing.listingId)).listing.recipientAddress)
+      .toBe(activeListing.recipientAddress);
+    expect((await repository.getListing(activeListing.listingId)).listing.approvedPrice)
+      .toEqual(activeListing.approvedPrice);
+  });
+
+  it("scales only seller demo listings published before the price cutover", async () => {
+    const transport = new FakeBlobTransport();
+    const legacy = {
+      ...structuredClone(activeListing),
+      listingId: "listing_legacy_demo",
+      publishedAt: "2026-08-22T03:19:12.953Z",
+      approvedPrice: { ...activeListing.approvedPrice, atomicAmount: "108000000" },
+    };
+    const current = {
+      ...structuredClone(activeListing),
+      listingId: "listing_current_demo",
+      publishedAt: "2026-08-22T03:25:00.000Z",
+      approvedPrice: { ...activeListing.approvedPrice, atomicAmount: "108000000" },
+    };
+    const repository = new VercelBlobMarketplaceRepository(transport);
+    await repository.publishSellerListing(legacy);
+    await repository.publishSellerListing(current);
+
+    expect((await repository.getListing(legacy.listingId)).listing.approvedPrice.atomicAmount).toBe("108000");
+    expect((await repository.getListing(current.listingId)).listing.approvedPrice.atomicAmount).toBe("108000000");
+  });
+
+  it("normalizes legacy sold-comparable prices exactly once", async () => {
+    const transport = new FakeBlobTransport();
+    const current = SEED_SOLD_COMPARABLES[0];
+    await new VercelBlobMarketplaceRepository(transport).createSoldComparable(current);
+    const pathname = `records/comparables/sold/${current.comparableId}.json`;
+    const stored = transport.stored.get(pathname)!;
+    const legacy = structuredClone(current);
+    legacy.soldPrice.atomicAmount = (BigInt(current.soldPrice.atomicAmount) * BigInt(1_000)).toString();
+    transport.stored.set(pathname, { ...stored, body: JSON.stringify(legacy) });
+
+    await expect(new VercelBlobMarketplaceRepository(transport).listSoldComparables())
+      .resolves.toEqual([current]);
   });
 
   it("stores analysis-start claim and engine confirmation at separate immutable private paths", async () => {
