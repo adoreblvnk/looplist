@@ -23,6 +23,10 @@ vi.mock("server-only", () => ({}));
 beforeEach(() => { process.env.GOOGLE_GENERATIVE_AI_API_KEY = "test-google-key"; });
 
 describe("live Google model adapters", () => {
+  it("pins listing generation to the stable Gemini 3.7 Flash model", () => {
+    expect(GEMINI_LISTING_MODEL_ID).toBe("gemini-3.7-flash");
+  });
+
   it("sends adjacent photo IDs and canonical AI SDK file data to the pinned Gemini model", async () => {
     let captured: StructuredGenerationRequest<unknown> | undefined;
     const generate: StructuredGeneration = async <T>(request: StructuredGenerationRequest<T>) => {

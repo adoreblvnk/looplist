@@ -6,7 +6,9 @@ This document is the sole source of truth for the LoopList hackathon prototype. 
 
 ## Summary
 
-LoopList is a Carousell-referenced, agent-native resale marketplace for electronics and running shoes. A seller uploads product photos, Gemini 3.6 Flash creates an evidence-backed listing, and Gemma uses seeded marketplace data to recommend a price. Buyers search in natural language, Gemma ranks matching listings, and an explicitly approved purchase settles through x402 on Base Sepolia testnet.
+LoopList is a Carousell-referenced, agent-native resale marketplace for electronics and running shoes. A seller uploads product photos, Gemini 3.7 Flash creates an evidence-backed listing, and Gemma uses seeded marketplace data to recommend a price. Buyers search in natural language, Gemma ranks matching listings, and an explicitly approved purchase settles through x402 on Base Sepolia testnet.
+
+Carousell reference imgs in img/ folder
 
 The prototype demonstrates one complete seller-to-buyer transaction. It does not claim affiliation with Carousell or use Carousell data, APIs, trademarks, or production services.
 
@@ -16,8 +18,27 @@ https://luma.com/deepmind-v4ci
 
 LoopList targets:
 
-- Most Creative Gemini Hack through Gemini 3.6 Flash multimodal product inspection.
-- Best Use of Gemma through essential comparable search, pricing, and buyer-side ranking.
+The unexpected use of Gemini Flash 3.7
+
+Surprise the room. Use Gemini’s speed and multimodal capabilities to create an interaction, tool, or experience people will remember after the demos end.
+
+Make the model behavior visible
+
+Create a memorable live moment
+
+Turn speed into a product advantage
+
+Best Use of Gemma
+
+Open models, pushed further
+
+Gemma has crossed one billion cumulative downloads. Show what an open model can do when you make a deliberate technical or product choice—not merely swap it into a generic demo.
+
+Run privately or at the edge
+
+Adapt the model for a specific community
+
+Make openness essential to the product
 
 Core pitch:
 
@@ -69,7 +90,7 @@ A fixed demo buyer searching by product requirements, budget, condition, and pre
 
 ### Seller Agent
 
-The seller uploads 3 to 8 photos. Gemini 3.6 Flash produces:
+The seller uploads 3 to 8 photos. Gemini 3.7 Flash produces:
 
 - Product identity.
 - Product category.
@@ -160,7 +181,7 @@ The receipt is bound by stored identifiers, not a custom cryptographic listing h
 
 1. Seller opens the marketplace and selects Sell.
 2. Seller uploads 3 to 8 photos.
-3. Gemini 3.6 Flash generates the editable listing and photo-backed condition evidence.
+3. Gemini 3.7 Flash generates the editable listing and photo-backed condition evidence.
 4. Gemma searches seeded sold comparables and recommends a price.
 5. Seller edits and publishes the listing.
 6. The listing appears in the marketplace feed and on its detail page.
@@ -245,7 +266,7 @@ Seed data must be deterministic and clearly separated from live model-generated 
 
 ## AI Responsibilities
 
-### Gemini 3.6 Flash
+### Gemini 3.7 Flash
 
 - Multimodal inspection of seller photos.
 - Structured listing generation.
@@ -308,7 +329,7 @@ Vercel project access is required for Production deployment and Workflows. Verce
 The prototype is complete when:
 
 - A seller uploads 3 to 8 electronics or running-shoe photos.
-- Live Gemini 3.6 Flash returns a valid editable listing with visible condition evidence.
+- Live Gemini 3.7 Flash returns a valid editable listing with visible condition evidence.
 - Live Gemma searches seeded sold comparables and recommends a price.
 - Seller edits and publishes the listing.
 - The listing appears in the marketplace feed and detail route.

@@ -83,6 +83,7 @@ p { text-wrap: pretty; }
 .buyer-search-form label { display: block; margin-bottom: 6px; font-size: .77rem; font-weight: 720; }
 .buyer-search-control { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
 .buyer-search-control textarea { min-height: 62px; resize: vertical; border: 1px solid var(--rule); border-radius: 2px 0 0 2px; background: var(--paper); padding: 10px 11px; line-height: 1.4; }
+.buyer-search-control textarea::placeholder { color: oklch(.39 0 0); }
 .buyer-search-control .button { min-width: 124px; border-radius: 0 2px 2px 0; }
 .buyer-search-status, .ranked-results { grid-column: 1 / -1; }
 .buyer-search-status:empty { display: none; }

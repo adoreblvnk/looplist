@@ -6,7 +6,7 @@ import { FormEvent, useRef, useState } from "react";
 import type { BuyerSearchResponse } from "./types";
 import { displayListingPrice, humanize, publicMediaUrl } from "./utils";
 
-const EXAMPLE_QUERY = "Find a MacBook below 900 USDC with no visible screen damage and acceptable cosmetic wear.";
+export const BUYER_QUERY_PLACEHOLDER = "BNIB Air Force 1 under 120 USDC, can nego, MRT meetup, deal today.";
 const CLIENT_TIMEOUT_MS = 95_000;
 
 type SearchState =
@@ -16,7 +16,7 @@ type SearchState =
   | { status: "error"; message: string; timeout: boolean };
 
 export function BuyerSearch() {
-  const [query, setQuery] = useState(EXAMPLE_QUERY);
+  const [query, setQuery] = useState("");
   const [state, setState] = useState<SearchState>({ status: "idle" });
   const replay = useRef<{ query: string; key: string } | null>(null);
 
@@ -77,6 +77,7 @@ export function BuyerSearch() {
             id="buyer-request"
             rows={2}
             maxLength={500}
+            placeholder={BUYER_QUERY_PLACEHOLDER}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             disabled={state.status === "loading"}

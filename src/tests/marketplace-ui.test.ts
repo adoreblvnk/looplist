@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { BUYER_QUERY_PLACEHOLDER } from "../components/marketplace/buyer-search";
 import {
   displayListingPrice,
   displayPrice,
@@ -39,6 +40,10 @@ const money = (atomicAmount: string) => ({
 }) satisfies Money;
 
 describe("marketplace UI utilities", () => {
+  it("uses the Air Force 1 regional resale query as buyer-search guidance", () => {
+    expect(BUYER_QUERY_PLACEHOLDER).toBe("BNIB Air Force 1 under 120 USDC, can nego, MRT meetup, deal today.");
+  });
+
   it("parses exact six-decimal raw USDC without floats", () => {
     expect(parseUsdcInput("12.34")).toBe("12340000");
     expect(parseUsdcInput("0.000001")).toBe("1");
