@@ -7,6 +7,19 @@ export interface StructuredGenerationRequest<T> {
   modelId: string;
   schema: ZodType<T>;
   messages: ModelMessage[];
+  settings?: StructuredGenerationSettings;
+}
+
+export interface StructuredGenerationSettings {
+  temperature?: number;
+  topP?: number;
+  topK?: number;
+  providerOptions?: {
+    google: {
+      structuredOutputs?: boolean;
+      thinkingConfig?: { thinkingLevel?: "minimal" | "low" | "medium" | "high" };
+    };
+  };
 }
 
 export type StructuredGeneration = <T>(request: StructuredGenerationRequest<T>) => Promise<T>;
@@ -31,7 +44,7 @@ export function createGoogleStructuredGeneration(
     generate: generateText,
   }
 ): StructuredGeneration {
-  return async <T>({ modelId, schema, messages }: StructuredGenerationRequest<T>) => {
+  return async <T>({ modelId, schema, messages, settings }: StructuredGenerationRequest<T>) => {
     const google = dependencies.createProvider({ apiKey: requireGoogleApiKey() });
     const result = await dependencies.generate({
       model: google(modelId),
@@ -40,6 +53,7 @@ export function createGoogleStructuredGeneration(
       maxRetries: 0,
       maxOutputTokens: GOOGLE_MAX_OUTPUT_TOKENS,
       abortSignal: AbortSignal.timeout(GOOGLE_GENERATION_TIMEOUT_MS),
+      ...settings,
     });
     return result.output as T;
   };

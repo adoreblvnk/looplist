@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GeminiListingCandidateSchema, GemmaPriceCandidateSchema } from "../lib/analysis/contracts";
 import { GeminiListingDraftGenerator, GEMINI_LISTING_INSTRUCTIONS } from "../lib/analysis/gemini-listing-adapter";
-import { GemmaPriceRecommendationGenerator, GEMMA_PRICING_INSTRUCTIONS } from "../lib/analysis/gemma-price-adapter";
+import { GemmaPriceRecommendationGenerator, GEMMA_PRICING_INSTRUCTIONS, GEMMA_PRICING_SETTINGS } from "../lib/analysis/gemma-price-adapter";
 import {
   createGoogleStructuredGeneration,
   GOOGLE_GENERATION_TIMEOUT_MS,
@@ -69,6 +69,7 @@ describe("live Google model adapters", () => {
     const request = captured!;
     expect(request.modelId).toBe(GEMMA_PRICING_MODEL_ID);
     expect(request.schema).toBe(GemmaPriceCandidateSchema);
+    expect(request.settings).toEqual(GEMMA_PRICING_SETTINGS);
     expect(request.messages[0].content).toContain(GEMMA_PRICING_INSTRUCTIONS);
     expect(request.messages[0].content).toContain(comparable.comparableId);
     expect(request.messages[0].content).not.toContain("sellerAddress");
@@ -79,6 +80,9 @@ describe("live Google model adapters", () => {
     for (const reference of validDraft.media) expect(serializedPrompt).not.toContain(reference.pathname);
     expect(GEMMA_PRICING_INSTRUCTIONS).toContain("Do not use tools, network access, external comparables");
     expect(GEMMA_PRICING_INSTRUCTIONS).toContain("atomic USDC");
+    for (const key of ["recommendedAtomicAmount", "minimumAtomicAmount", "maximumAtomicAmount", "comparables", "strongestComparableIds", "rationale"]) {
+      expect(GEMMA_PRICING_INSTRUCTIONS).toContain(key);
+    }
   });
 
   it("uses the direct provider, exact model identity, object output, and zero AI SDK retries", async () => {

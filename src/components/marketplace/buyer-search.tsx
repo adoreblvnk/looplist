@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { FormEvent, useRef, useState } from "react";
 import type { BuyerSearchResponse } from "./types";
-import { displayPrice, humanize, publicMediaUrl } from "./utils";
+import { displayListingPrice, humanize, publicMediaUrl } from "./utils";
 
 const EXAMPLE_QUERY = "Find a MacBook below 900 USDC with no visible screen damage and acceptable cosmetic wear.";
 const CLIENT_TIMEOUT_MS = 95_000;
@@ -121,7 +121,7 @@ export function BuyerSearch() {
               </Link>
               <div className="ranked-result-main">
                 <div className="ranked-result-title">
-                  <div><strong>{displayPrice(match.listing.price)}</strong><h3>{match.listing.title}</h3></div>
+                  <div><strong>{displayListingPrice(match.listing.price)}</strong><h3>{match.listing.title}</h3></div>
                   <span>{humanize(match.listing.condition)}</span>
                 </div>
                 <p className="fit-explanation">{match.fitExplanation}</p>
