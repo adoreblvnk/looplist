@@ -723,6 +723,8 @@ describe("durable AI and publication outputs", () => {
       attempt: 2,
       startedAt: "2026-08-21T10:00:00.000Z",
       failedAt: "2026-08-21T10:01:00.000Z",
+      failureKind: "gemini" as const,
+      failureStage: "gemini" as const,
       error: ANALYSIS_RUN_FAILURES.gemini,
     };
     expect(AnalysisRunStateSchema.safeParse(failed).success).toBe(true);
@@ -748,6 +750,8 @@ describe("durable AI and publication outputs", () => {
       startedAt: "2026-08-21T10:00:00.000Z",
       failedAt: "2026-08-21T10:01:00.000Z",
       draft: validDraft,
+      failureKind: "gemma" as const,
+      failureStage: "gemma" as const,
       error: ANALYSIS_RUN_FAILURES.gemma,
     };
     expect(AnalysisRunStateSchema.safeParse(failed).success).toBe(true);
@@ -848,6 +852,8 @@ describe("durable AI and publication outputs", () => {
       {
         startedAt: "2026-08-21T10:00:00.000Z",
         failedAt: "2026-08-21T10:01:00.000Z",
+        failureKind: "gemini",
+        failureStage: "gemini",
         error: { code: "analysis_failed", message: "Analysis failed after starting." },
       },
     ],

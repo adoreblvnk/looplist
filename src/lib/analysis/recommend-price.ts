@@ -9,8 +9,10 @@ import {
 import { MAX_SOLD_COMPARABLES, type MarketplaceRepository } from "../persistence/repository";
 import {
   GemmaPriceCandidateSchema,
+  PricingDraftProjectionSchema,
   type PriceRecommendationGenerator,
   type PricingComparable,
+  type PricingDraftProjection,
 } from "./contracts";
 import { AnalysisCoreError } from "./generate-listing-draft";
 
@@ -38,22 +40,43 @@ function pricingComparable(comparable: SoldComparable): PricingComparable {
   };
 }
 
-export async function recommendPrice(
-  repository: MarketplaceRepository,
-  generator: PriceRecommendationGenerator,
-  input: ListingDraft
-): Promise<PriceRecommendation> {
+export function pricingDraftProjection(input: ListingDraft): PricingDraftProjection {
   const draft = ListingDraftSchema.parse(structuredClone(input));
+  return PricingDraftProjectionSchema.parse({
+    title: draft.title,
+    description: draft.description,
+    category: draft.category,
+    brand: draft.brand,
+    model: draft.model,
+    condition: draft.condition,
+    attributes: structuredClone(draft.attributes),
+    includedAccessories: structuredClone(draft.includedAccessories),
+    visiblyMissingAccessories: structuredClone(draft.visiblyMissingAccessories),
+    evidence: draft.evidence.map(({ id, kind, claim, confidence }) => ({ id, kind, claim, confidence })),
+    assumptions: draft.assumptions.map(({ field, value, confidence }) => ({ field, value, confidence })),
+  });
+}
+
+export interface PreparedPriceRecommendation {
+  generatorInput: {
+    draft: PricingDraftProjection;
+    soldComparables: PricingComparable[];
+  };
+  corpusById: Map<string, SoldComparable>;
+}
+
+export async function preparePriceRecommendation(
+  repository: MarketplaceRepository,
+  input: ListingDraft
+): Promise<PreparedPriceRecommendation> {
+  const draft = pricingDraftProjection(input);
   const storedCorpus = structuredClone(await repository.listSoldComparables());
   if (storedCorpus.length > MAX_SOLD_COMPARABLES) {
     throw new AnalysisCoreError("sold_comparable_corpus_invalid", "Sold comparable corpus exceeded its record limit");
   }
   const corpus = SoldComparableSchema.array().max(MAX_SOLD_COMPARABLES).parse(storedCorpus);
   if (corpus.length === 0) {
-    throw new AnalysisCoreError(
-      "sold_comparable_corpus_empty",
-      "Sold comparable corpus is empty"
-    );
+    throw new AnalysisCoreError("sold_comparable_corpus_empty", "Sold comparable corpus is empty");
   }
 
   const corpusById = new Map<string, SoldComparable>();
@@ -67,10 +90,7 @@ export async function recommendPrice(
     corpusById.set(comparable.comparableId, comparable);
   }
 
-  const generatorInput = {
-    draft: structuredClone(draft),
-    soldComparables: corpus.map(pricingComparable),
-  };
+  const generatorInput = { draft, soldComparables: corpus.map(pricingComparable) };
   const inputBytes = new TextEncoder().encode(JSON.stringify(generatorInput)).byteLength;
   if (inputBytes > MAX_GEMMA_PRICING_INPUT_BYTES) {
     throw new AnalysisCoreError(
@@ -78,10 +98,14 @@ export async function recommendPrice(
       "Sold comparable pricing input exceeded its byte limit"
     );
   }
+  return { generatorInput, corpusById };
+}
 
-  const candidate = GemmaPriceCandidateSchema.parse(
-    await generator.generate(structuredClone(generatorInput))
-  );
+export function hydratePriceRecommendation(
+  prepared: PreparedPriceRecommendation,
+  output: unknown
+): PriceRecommendation {
+  const candidate = GemmaPriceCandidateSchema.parse(output);
   const selectedIds = new Set<string>();
   const comparables = candidate.comparables.map((selection) => {
     if (selectedIds.has(selection.comparableId)) {
@@ -91,7 +115,7 @@ export async function recommendPrice(
       );
     }
     selectedIds.add(selection.comparableId);
-    const authoritative = corpusById.get(selection.comparableId);
+    const authoritative = prepared.corpusById.get(selection.comparableId);
     if (!authoritative) {
       throw new AnalysisCoreError(
         "price_candidate_unknown_comparable",
@@ -113,4 +137,16 @@ export async function recommendPrice(
     strongestComparableIds: structuredClone(candidate.strongestComparableIds),
     rationale: candidate.rationale,
   });
+}
+
+export async function recommendPrice(
+  repository: MarketplaceRepository,
+  generator: PriceRecommendationGenerator,
+  input: ListingDraft
+): Promise<PriceRecommendation> {
+  const prepared = await preparePriceRecommendation(repository, input);
+  return hydratePriceRecommendation(
+    prepared,
+    await generator.generate(structuredClone(prepared.generatorInput))
+  );
 }

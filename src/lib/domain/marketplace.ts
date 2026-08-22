@@ -886,7 +886,34 @@ export const ANALYSIS_RUN_FAILURES = {
     code: "analysis_price_recommendation_failed",
     message: "Price recommendation failed. Please retry.",
   },
+  configuration: {
+    code: "analysis_configuration_unavailable",
+    message: "Analysis configuration is unavailable. Please try again later.",
+  },
+  input: {
+    code: "analysis_input_invalid",
+    message: "Analysis input could not be processed.",
+  },
+  comparable_data: {
+    code: "analysis_comparable_data_invalid",
+    message: "Comparable pricing data is unavailable.",
+  },
+  orchestration: {
+    code: "analysis_orchestration_failed",
+    message: "Analysis orchestration failed. Please try again.",
+  },
 } as const;
+export const AnalysisFailureKindSchema = z.enum([
+  "gemini",
+  "gemma",
+  "configuration",
+  "input",
+  "comparable_data",
+  "orchestration",
+]);
+export type AnalysisFailureKind = z.infer<typeof AnalysisFailureKindSchema>;
+export const AnalysisFailureStageSchema = z.enum(["gemini", "gemma"]);
+export type AnalysisFailureStage = z.infer<typeof AnalysisFailureStageSchema>;
 
 const AnalysisRunSnapshotShape = {
   media: z.array(MediaReferenceSchema).min(3).max(8),
@@ -900,7 +927,7 @@ export const AnalysisRunStateSchema = z
     z.object({ ...RunBaseShape, ...AnalysisRunSnapshotShape, kind: z.literal("analysis"), status: z.literal("queued") }).strict(),
     z.object({ ...RunBaseShape, ...AnalysisRunSnapshotShape, kind: z.literal("analysis"), status: z.literal("running"), startedAt: TimestampSchema, draft: ListingDraftSchema.optional() }).strict(),
     z.object({ ...RunBaseShape, ...AnalysisRunSnapshotShape, kind: z.literal("analysis"), status: z.literal("succeeded"), startedAt: TimestampSchema, completedAt: TimestampSchema, draft: ListingDraftSchema, priceRecommendation: PriceRecommendationSchema }).strict(),
-    z.object({ ...RunBaseShape, ...AnalysisRunSnapshotShape, kind: z.literal("analysis"), status: z.literal("failed"), startedAt: TimestampSchema, failedAt: TimestampSchema, draft: ListingDraftSchema.optional(), error: RunErrorSchema }).strict(),
+    z.object({ ...RunBaseShape, ...AnalysisRunSnapshotShape, kind: z.literal("analysis"), status: z.literal("failed"), startedAt: TimestampSchema, failedAt: TimestampSchema, draft: ListingDraftSchema.optional(), failureKind: AnalysisFailureKindSchema, failureStage: AnalysisFailureStageSchema, error: RunErrorSchema }).strict(),
   ])
   .superRefine((run, context) => {
     addRunChronologyIssues(run, context);
@@ -933,16 +960,21 @@ export const AnalysisRunStateSchema = z
       context.addIssue({ code: "custom", path: ["gemmaAttempts"], message: "Successful analysis requires a Gemma attempt" });
     }
     if (run.status === "failed") {
-      const stage = run.draft ? "gemma" : "gemini";
-      const expectedFailure = ANALYSIS_RUN_FAILURES[stage];
+      const expectedFailure = ANALYSIS_RUN_FAILURES[run.failureKind];
       if (run.error.code !== expectedFailure.code || run.error.message !== expectedFailure.message) {
         context.addIssue({
           code: "custom",
           path: ["error"],
-          message: `Failed analysis must use the sanitized ${stage} failure`,
+          message: `Failed analysis must use the sanitized ${run.failureKind} failure`,
         });
       }
-      if (stage === "gemini" && (
+      if (run.failureStage === "gemini" && run.draft && run.failureKind !== "orchestration") {
+        context.addIssue({ code: "custom", path: ["draft"], message: "Only Gemini-stage orchestration failure may preserve a draft" });
+      }
+      if (run.failureStage === "gemma" && !run.draft) {
+        context.addIssue({ code: "custom", path: ["draft"], message: "Gemma-stage failure requires a durable draft" });
+      }
+      if (run.failureKind === "gemini" && (
         run.geminiAttempts !== MAX_ANALYSIS_STAGE_ATTEMPTS || run.gemmaAttempts !== 0
       )) {
         context.addIssue({
@@ -951,7 +983,7 @@ export const AnalysisRunStateSchema = z
           message: "Listing-generation failure requires exactly two Gemini attempts and no Gemma attempts",
         });
       }
-      if (stage === "gemma" && (
+      if (run.failureKind === "gemma" && (
         run.geminiAttempts < 1 || run.gemmaAttempts !== MAX_ANALYSIS_STAGE_ATTEMPTS
       )) {
         context.addIssue({
@@ -959,6 +991,18 @@ export const AnalysisRunStateSchema = z
           path: ["gemmaAttempts"],
           message: "Price-recommendation failure requires a durable Gemini draft and exactly two Gemma attempts",
         });
+      }
+      if (run.failureKind === "gemini" && run.failureStage !== "gemini") {
+        context.addIssue({ code: "custom", path: ["failureStage"], message: "Gemini failure must bind to the Gemini stage" });
+      }
+      if (run.failureKind === "gemma" && run.failureStage !== "gemma") {
+        context.addIssue({ code: "custom", path: ["failureStage"], message: "Gemma failure must bind to the Gemma stage" });
+      }
+      if (run.failureKind === "input" && run.failureStage !== "gemini") {
+        context.addIssue({ code: "custom", path: ["failureStage"], message: "Input failure must bind to the Gemini stage" });
+      }
+      if (run.failureKind === "comparable_data" && run.failureStage !== "gemma") {
+        context.addIssue({ code: "custom", path: ["failureStage"], message: "Comparable-data failure must bind to the Gemma stage" });
       }
     }
     if (!draft) return;

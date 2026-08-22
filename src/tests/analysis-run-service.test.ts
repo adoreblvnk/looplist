@@ -122,7 +122,7 @@ describe("durable analysis run service", () => {
     await expect(service.finalizeFailure("analysis-run-failure", "gemini")).rejects.toBeInstanceOf(AnalysisRunTransitionError);
     await expect(service.generateDraftStep("analysis-run-failure", { generate })).rejects.toBeInstanceOf(AnalysisRunExecutionError);
     expect(generate).toHaveBeenCalledTimes(2);
-    await expect(service.generateDraftStep("analysis-run-failure", { generate })).rejects.toBeInstanceOf(AnalysisRunTransitionError);
+    await expect(service.generateDraftStep("analysis-run-failure", { generate })).rejects.toMatchObject({ failureKind: "orchestration" });
     const failed = await service.finalizeFailure("analysis-run-failure", "gemini");
     expect(failed).toMatchObject({ status: "failed", media: media(), geminiAttempts: 2, gemmaAttempts: 0, error: {
       code: "analysis_listing_generation_failed", message: "Listing analysis failed. Please retry.",
@@ -191,7 +191,7 @@ describe("durable analysis run service", () => {
     await draftService.enqueue("analysis-lost-draft-response", media());
     await expect(
       draftService.generateDraftStep("analysis-lost-draft-response", { generate: listingGenerate })
-    ).rejects.toBeInstanceOf(RepositoryUnavailableError);
+    ).rejects.toMatchObject({ failureKind: "orchestration" });
     expect(
       await draftService.generateDraftStep("analysis-lost-draft-response", { generate: listingGenerate })
     ).toMatchObject({ status: "running", draft: validDraft });
@@ -216,7 +216,7 @@ describe("durable analysis run service", () => {
     });
     await expect(
       successService.recommendPriceStep("analysis-lost-success-response", { generate: priceGenerate })
-    ).rejects.toBeInstanceOf(RepositoryUnavailableError);
+    ).rejects.toMatchObject({ failureKind: "orchestration" });
     expect(
       await successService.recommendPriceStep("analysis-lost-success-response", { generate: priceGenerate })
     ).toMatchObject({ status: "succeeded" });

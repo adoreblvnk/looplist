@@ -27,6 +27,14 @@ export function durableRunPath(kind: DurableRunKind, runId: string): string {
   return `records/runs/${DurableRunKindSchema.parse(kind)}/${id(runId)}.json`;
 }
 
+export function analysisStartClaimPath(runId: string): string {
+  return `records/runs/analysis-start/${id(runId)}/claim.json`;
+}
+
+export function analysisStartConfirmationPath(runId: string): string {
+  return `records/runs/analysis-start/${id(runId)}/confirmation.json`;
+}
+
 export function settlementReceiptPath(purchaseId: string): string {
   const parsed = z
     .string()
@@ -79,6 +87,14 @@ export const DurableRunPathSchema = z
     new RegExp(`^records/runs/(?:analysis|publication|purchase)/${CanonicalPathIdentifierPattern}\\.json$`),
     "Invalid durable run path"
   );
+export const AnalysisStartClaimPathSchema = z.string().regex(
+  new RegExp(`^records/runs/analysis-start/${CanonicalPathIdentifierPattern}/claim\\.json$`),
+  "Invalid immutable analysis-start claim path"
+);
+export const AnalysisStartConfirmationPathSchema = z.string().regex(
+  new RegExp(`^records/runs/analysis-start/${CanonicalPathIdentifierPattern}/confirmation\\.json$`),
+  "Invalid immutable analysis-start confirmation path"
+);
 export const SettlementReceiptPathSchema = z
   .string()
   .regex(

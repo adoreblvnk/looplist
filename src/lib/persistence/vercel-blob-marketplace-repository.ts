@@ -23,6 +23,8 @@ import {
 } from "../domain/marketplace";
 import {
   DurableRunPathSchema,
+  analysisStartClaimPath,
+  analysisStartConfirmationPath,
   PublishedListingPathSchema,
   SoldComparablePathSchema,
   durableRunPath,
@@ -32,6 +34,8 @@ import {
   soldComparablePath,
 } from "./paths";
 import {
+  AnalysisStartClaimSchema,
+  AnalysisStartConfirmationSchema,
   DurableRunSnapshotSchema,
   MarketplaceListingSchema,
   MAX_SOLD_COMPARABLES,
@@ -42,11 +46,14 @@ import {
   RepositoryNotFoundError,
   RepositoryUnavailableError,
   assertReceiptMatchesPublishedActiveListing,
+  type AnalysisStartClaim,
+  type AnalysisStartConfirmation,
   type DurableRunSnapshot,
   type MarketplaceListing,
   type MarketplaceRepository,
   type PrivateMediaContent,
   type PrivateMediaMetadata,
+  type QueuedAnalysisRun,
 } from "./repository";
 
 const MAX_JSON_BYTES = 512 * 1024;
@@ -217,6 +224,39 @@ function encodeJson(value: unknown): string {
 
 export class VercelBlobMarketplaceRepository implements MarketplaceRepository {
   constructor(private readonly transport: PrivateBlobTransport = vercelPrivateBlobTransport) {}
+
+  async createAnalysisRun(candidate: QueuedAnalysisRun): Promise<QueuedAnalysisRun> {
+    const run = DurableRunSnapshotSchema.parse(structuredClone(candidate));
+    if (run.kind !== "analysis" || run.status !== "queued") {
+      throw new TypeError("createAnalysisRun accepts queued analysis runs only");
+    }
+    await this.putJson(durableRunPath("analysis", run.runId), run, false);
+    return DurableRunSnapshotSchema.parse(structuredClone(run)) as QueuedAnalysisRun;
+  }
+
+  async createAnalysisStartClaim(candidate: AnalysisStartClaim): Promise<AnalysisStartClaim> {
+    const claim = AnalysisStartClaimSchema.parse(structuredClone(candidate));
+    await this.putJson(analysisStartClaimPath(claim.runId), claim, false);
+    return AnalysisStartClaimSchema.parse(structuredClone(claim));
+  }
+
+  async readAnalysisStartClaim(runId: string): Promise<AnalysisStartClaim> {
+    const claim = await this.readJson(analysisStartClaimPath(runId), AnalysisStartClaimSchema);
+    if (claim.runId !== runId) throw new RepositoryDataError("Stored analysis-start claim does not match its path");
+    return claim;
+  }
+
+  async createAnalysisStartConfirmation(candidate: AnalysisStartConfirmation): Promise<AnalysisStartConfirmation> {
+    const confirmation = AnalysisStartConfirmationSchema.parse(structuredClone(candidate));
+    await this.putJson(analysisStartConfirmationPath(confirmation.runId), confirmation, false);
+    return AnalysisStartConfirmationSchema.parse(structuredClone(confirmation));
+  }
+
+  async readAnalysisStartConfirmation(runId: string): Promise<AnalysisStartConfirmation> {
+    const confirmation = await this.readJson(analysisStartConfirmationPath(runId), AnalysisStartConfirmationSchema);
+    if (confirmation.runId !== runId) throw new RepositoryDataError("Stored analysis-start confirmation does not match its path");
+    return confirmation;
+  }
 
   async publishSellerListing(candidate: ActiveListing): Promise<MarketplaceListing> {
     const listing = ActiveListingSchema.parse(structuredClone(candidate));

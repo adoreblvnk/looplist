@@ -96,6 +96,13 @@ describe("Gemma comparable pricing core", () => {
     const corpus = { ...structuredClone(comparable), title: "Immutable sold title", similarityScore: 0.2 };
     const repository = new InMemoryMarketplaceRepository({ soldComparables: [corpus] });
     const generate = vi.fn(async (input) => {
+      const serialized = JSON.stringify(input);
+      for (const forbidden of ["pathname", "\"media\"", "\"width\"", "\"height\"", "\"bytes\""]) {
+        expect(serialized).not.toContain(forbidden);
+      }
+      for (const reference of validDraft.media) expect(serialized).not.toContain(reference.pathname);
+      expect(input.draft.evidence[0]).toEqual(expect.objectContaining({ id: validDraft.evidence[0].id, claim: validDraft.evidence[0].claim }));
+      expect(input.draft.evidence[0]).not.toHaveProperty("photoId");
       input.draft.title = "Generator mutation";
       input.soldComparables[0].title = "Generator attempted fact mutation";
       return priceCandidate();

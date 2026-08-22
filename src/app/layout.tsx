@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "LoopList: Verified Marketplace Listings from Item Photos",
-  description: "LoopList converts item photos into a verified, structured marketplace listing with multimodal Gemini reasoning, defect disclosure, and explicit seller approval.",
+  title: "LoopList",
+  description: "An agent-native resale marketplace.",
 };
 
 export default function RootLayout({

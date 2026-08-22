@@ -26,16 +26,20 @@ export class AnalysisCoreError extends Error {
   }
 }
 
+export interface PreparedListingGeneration {
+  media: MediaReference[];
+  photos: ListingGeneratorPhoto[];
+}
+
 function canonicalTimestamp(timestamp: string): boolean {
   const parsed = new Date(timestamp);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString() === timestamp;
 }
 
-export async function generateListingDraft(
+export async function prepareListingGeneration(
   repository: MarketplaceRepository,
-  generator: ListingDraftGenerator,
   input: readonly MediaReference[]
-): Promise<ListingDraft> {
+): Promise<PreparedListingGeneration> {
   const media = AnalysisMediaInputSchema.parse(structuredClone(input));
   const photos: ListingGeneratorPhoto[] = [];
   let totalBytes = 0;
@@ -68,11 +72,28 @@ export async function generateListingDraft(
       bytes: new Uint8Array(content.bytes),
     });
   }
+  return { media, photos };
+}
 
-  const candidate = GeminiListingCandidateSchema.parse(
-    await generator.generate({ photos: structuredClone(photos) })
-  );
-  return ListingDraftSchema.parse(
-    structuredClone({ ...candidate, media: media.map((reference) => structuredClone(reference)) })
+export function hydrateListingDraft(
+  prepared: PreparedListingGeneration,
+  candidate: unknown
+): ListingDraft {
+  const parsed = GeminiListingCandidateSchema.parse(candidate);
+  return ListingDraftSchema.parse({
+    ...structuredClone(parsed),
+    media: prepared.media.map((reference) => structuredClone(reference)),
+  });
+}
+
+export async function generateListingDraft(
+  repository: MarketplaceRepository,
+  generator: ListingDraftGenerator,
+  input: readonly MediaReference[]
+): Promise<ListingDraft> {
+  const prepared = await prepareListingGeneration(repository, input);
+  return hydrateListingDraft(
+    prepared,
+    await generator.generate({ photos: structuredClone(prepared.photos) })
   );
 }

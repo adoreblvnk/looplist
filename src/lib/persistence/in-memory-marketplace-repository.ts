@@ -13,8 +13,10 @@ import {
   type SettlementReceipt,
   type SoldComparable,
 } from "../domain/marketplace";
-import { durableRunPath, publishedListingPath, reconciliationRecordPath, settlementReceiptPath, soldComparablePath } from "./paths";
+import { analysisStartClaimPath, analysisStartConfirmationPath, durableRunPath, publishedListingPath, reconciliationRecordPath, settlementReceiptPath, soldComparablePath } from "./paths";
 import {
+  AnalysisStartClaimSchema,
+  AnalysisStartConfirmationSchema,
   DurableRunSnapshotSchema,
   MarketplaceListingSchema,
   MAX_SOLD_COMPARABLES,
@@ -23,11 +25,14 @@ import {
   RepositoryDataError,
   RepositoryNotFoundError,
   assertReceiptMatchesPublishedActiveListing,
+  type AnalysisStartClaim,
+  type AnalysisStartConfirmation,
   type DurableRunSnapshot,
   type MarketplaceListing,
   type MarketplaceRepository,
   type PrivateMediaContent,
   type PrivateMediaMetadata,
+  type QueuedAnalysisRun,
 } from "./repository";
 
 type SeedMedia = { media: MediaReference; bytes: Uint8Array; uploadedAt?: string };
@@ -63,6 +68,8 @@ function parseStored<T>(schema: z.ZodType<T>, value: unknown, message: string): 
 export class InMemoryMarketplaceRepository implements MarketplaceRepository {
   private readonly listings = new Map<string, ActiveListing>();
   private readonly runs = new Map<string, DurableRunSnapshot>();
+  private readonly analysisStartClaims = new Map<string, AnalysisStartClaim>();
+  private readonly analysisStartConfirmations = new Map<string, AnalysisStartConfirmation>();
   private readonly receipts = new Map<string, SettlementReceipt>();
   private readonly reconciliations = new Map<string, ReconciliationFailure>();
   private readonly comparables = new Map<string, SoldComparable>();
@@ -113,6 +120,51 @@ export class InMemoryMarketplaceRepository implements MarketplaceRepository {
         case "media": (this.media as Map<string, unknown>).set(injection.key, value); break;
       }
     }
+  }
+
+  async createAnalysisRun(candidate: QueuedAnalysisRun): Promise<QueuedAnalysisRun> {
+    const run = DurableRunSnapshotSchema.parse(cloneRecord(candidate));
+    if (run.kind !== "analysis" || run.status !== "queued") {
+      throw new TypeError("createAnalysisRun accepts queued analysis runs only");
+    }
+    const key = `analysis:${run.runId}`;
+    if (this.runs.has(key)) throw new RepositoryConflictError();
+    this.runs.set(key, cloneRecord(run));
+    return DurableRunSnapshotSchema.parse(cloneRecord(run)) as QueuedAnalysisRun;
+  }
+
+  async createAnalysisStartClaim(candidate: AnalysisStartClaim): Promise<AnalysisStartClaim> {
+    const claim = AnalysisStartClaimSchema.parse(cloneRecord(candidate));
+    analysisStartClaimPath(claim.runId);
+    if (this.analysisStartClaims.has(claim.runId)) throw new RepositoryConflictError();
+    this.analysisStartClaims.set(claim.runId, cloneRecord(claim));
+    return AnalysisStartClaimSchema.parse(cloneRecord(claim));
+  }
+
+  async readAnalysisStartClaim(runId: string): Promise<AnalysisStartClaim> {
+    analysisStartClaimPath(runId);
+    const stored = this.analysisStartClaims.get(runId);
+    if (!stored) throw new RepositoryNotFoundError("Analysis-start claim was not found");
+    const claim = parseStored(AnalysisStartClaimSchema, stored, "Stored analysis-start claim failed validation");
+    if (claim.runId !== runId) throw new RepositoryDataError("Stored analysis-start claim does not match its path");
+    return cloneRecord(claim);
+  }
+
+  async createAnalysisStartConfirmation(candidate: AnalysisStartConfirmation): Promise<AnalysisStartConfirmation> {
+    const confirmation = AnalysisStartConfirmationSchema.parse(cloneRecord(candidate));
+    analysisStartConfirmationPath(confirmation.runId);
+    if (this.analysisStartConfirmations.has(confirmation.runId)) throw new RepositoryConflictError();
+    this.analysisStartConfirmations.set(confirmation.runId, cloneRecord(confirmation));
+    return AnalysisStartConfirmationSchema.parse(cloneRecord(confirmation));
+  }
+
+  async readAnalysisStartConfirmation(runId: string): Promise<AnalysisStartConfirmation> {
+    analysisStartConfirmationPath(runId);
+    const stored = this.analysisStartConfirmations.get(runId);
+    if (!stored) throw new RepositoryNotFoundError("Analysis-start confirmation was not found");
+    const confirmation = parseStored(AnalysisStartConfirmationSchema, stored, "Stored analysis-start confirmation failed validation");
+    if (confirmation.runId !== runId) throw new RepositoryDataError("Stored analysis-start confirmation does not match its path");
+    return cloneRecord(confirmation);
   }
 
   async publishSellerListing(candidate: ActiveListing): Promise<MarketplaceListing> {

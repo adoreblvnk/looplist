@@ -6,7 +6,6 @@ import {
   MarketplaceCategorySchema,
   MediaReferenceSchema,
   PhotoEvidenceSchema,
-  type ListingDraft,
   type MediaReference,
   type SoldComparable,
 } from "../domain/marketplace";
@@ -90,6 +89,21 @@ export interface ListingDraftGenerator {
 
 export type PricingComparable = Omit<SoldComparable, "similarityScore" | "similarityReason">;
 
+export const PricingDraftProjectionSchema = z.object({
+  title: z.string().trim().min(5).max(80),
+  description: z.string().trim().min(20).max(3_000),
+  category: MarketplaceCategorySchema,
+  brand: LabelSchema,
+  model: LabelSchema,
+  condition: ListingConditionSchema,
+  attributes: ListingAttributesSchema,
+  includedAccessories: z.array(LabelSchema).max(20),
+  visiblyMissingAccessories: z.array(LabelSchema).max(20),
+  evidence: z.array(PhotoEvidenceSchema.pick({ id: true, kind: true, claim: true, confidence: true })).min(1).max(32),
+  assumptions: z.array(EditableAssumptionSchema.pick({ field: true, value: true, confidence: true })).max(16),
+}).strict();
+export type PricingDraftProjection = z.infer<typeof PricingDraftProjectionSchema>;
+
 export interface PriceRecommendationGenerator {
-  generate(input: { draft: ListingDraft; soldComparables: PricingComparable[] }): Promise<unknown>;
+  generate(input: { draft: PricingDraftProjection; soldComparables: PricingComparable[] }): Promise<unknown>;
 }

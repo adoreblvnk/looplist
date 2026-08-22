@@ -110,6 +110,37 @@ describe("VercelBlobMarketplaceRepository", () => {
     expect(transport.stored.get(transport.puts[0].pathname)?.body).not.toContain("BLOB_READ_WRITE_TOKEN");
   });
 
+  it("stores analysis-start claim and engine confirmation at separate immutable private paths", async () => {
+    const transport = new FakeBlobTransport();
+    const repository = new VercelBlobMarketplaceRepository(transport);
+    const claim = {
+      runId: "analysis-start-1",
+      media: structuredClone(validDraft.media),
+      claimedAt: "2026-08-21T10:00:00.000Z",
+    };
+    const confirmation = {
+      runId: claim.runId,
+      workflowRunId: "wrun_private_1",
+      confirmedAt: "2026-08-21T10:00:01.000Z",
+    };
+    await repository.createAnalysisStartClaim(claim);
+    await repository.createAnalysisStartConfirmation(confirmation);
+    expect(transport.puts).toEqual([
+      expect.objectContaining({
+        pathname: "records/runs/analysis-start/analysis-start-1/claim.json",
+        options: expect.objectContaining({ access: "private", allowOverwrite: false, addRandomSuffix: false }),
+      }),
+      expect.objectContaining({
+        pathname: "records/runs/analysis-start/analysis-start-1/confirmation.json",
+        options: expect.objectContaining({ access: "private", allowOverwrite: false, addRandomSuffix: false }),
+      }),
+    ]);
+    expect(await repository.readAnalysisStartClaim(claim.runId)).toEqual(claim);
+    expect(await repository.readAnalysisStartConfirmation(claim.runId)).toEqual(confirmation);
+    await expect(repository.createAnalysisStartClaim(claim)).rejects.toBeInstanceOf(RepositoryConflictError);
+    await expect(repository.createAnalysisStartConfirmation(confirmation)).rejects.toBeInstanceOf(RepositoryConflictError);
+  });
+
   it("creates and lists immutable sold comparables with strict path binding and bounds", async () => {
     const transport = new FakeBlobTransport();
     const repository = new VercelBlobMarketplaceRepository(transport);
@@ -174,6 +205,31 @@ describe("VercelBlobMarketplaceRepository", () => {
     await expect(repository.createSoldComparable(overflowRecord)).rejects.toBeInstanceOf(RepositoryDataError);
     expect(transport.puts).toHaveLength(2);
     expect(transport.stored.has("records/comparables/sold/capacity-comparable-100.json")).toBe(false);
+  });
+
+  it("immutably creates the initial analysis run at its deterministic private path", async () => {
+    const run = {
+      runId: "analysis-run-immutable", kind: "analysis" as const, status: "queued" as const,
+      media: structuredClone(validDraft.media), geminiAttempts: 0, gemmaAttempts: 0,
+      photoIds: validDraft.media.map(({ id }) => id), createdAt: "2026-08-21T10:00:00.000Z",
+      updatedAt: "2026-08-21T10:00:00.000Z", attempt: 0,
+    };
+    const transport = new FakeBlobTransport();
+    const repository = new VercelBlobMarketplaceRepository(transport);
+    await expect(repository.createAnalysisRun(run)).resolves.toEqual(run);
+    expect(transport.puts[0]).toEqual({
+      pathname: "records/runs/analysis/analysis-run-immutable.json",
+      options: { access: "private", addRandomSuffix: false, allowOverwrite: false, contentType: "application/json" },
+    });
+    await expect(repository.createAnalysisRun(run)).rejects.toBeInstanceOf(RepositoryConflictError);
+
+    for (const acknowledgement of [null, { pathname: "records/runs/analysis/changed.json" }]) {
+      const corruptTransport = new FakeBlobTransport();
+      corruptTransport.nextPutResult = acknowledgement;
+      await expect(
+        new VercelBlobMarketplaceRepository(corruptTransport).createAnalysisRun(run)
+      ).rejects.toBeInstanceOf(RepositoryDataError);
+    }
   });
 
   it("uses overwrite only for durable run snapshots and reads with private origin access", async () => {

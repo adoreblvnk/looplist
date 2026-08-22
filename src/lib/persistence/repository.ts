@@ -26,6 +26,7 @@ export const DurableRunSnapshotSchema = z.union([
   PurchaseRunStateSchema,
 ]);
 export type DurableRunSnapshot = z.infer<typeof DurableRunSnapshotSchema>;
+export type QueuedAnalysisRun = Extract<AnalysisRunState, { status: "queued" }>;
 
 export const MarketplaceListingSchema = z
   .object({
@@ -67,6 +68,20 @@ export const PrivateMediaContentSchema = z
     }
   });
 export type PrivateMediaContent = z.infer<typeof PrivateMediaContentSchema>;
+
+export const AnalysisStartClaimSchema = z.object({
+  runId: z.string().min(1).max(64).regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/),
+  media: z.array(MediaReferenceSchema).min(3).max(8),
+  claimedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/),
+}).strict();
+export type AnalysisStartClaim = z.infer<typeof AnalysisStartClaimSchema>;
+
+export const AnalysisStartConfirmationSchema = z.object({
+  runId: z.string().min(1).max(64).regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/),
+  workflowRunId: z.string().trim().min(1).max(256),
+  confirmedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/),
+}).strict();
+export type AnalysisStartConfirmation = z.infer<typeof AnalysisStartConfirmationSchema>;
 
 export class RepositoryConflictError extends Error {
   readonly code = "repository_conflict";
@@ -134,6 +149,16 @@ export function assertReceiptMatchesPublishedActiveListing(
 }
 
 export interface MarketplaceRepository {
+  /**
+   * Immutable creation boundary for the exact validated queued analysis snapshot.
+   * This prevents concurrent first writers from replacing the initial media binding.
+   * Later sole-writer transitions use saveRunSnapshot; no general CAS is provided.
+   */
+  createAnalysisRun(run: QueuedAnalysisRun): Promise<QueuedAnalysisRun>;
+  createAnalysisStartClaim(claim: AnalysisStartClaim): Promise<AnalysisStartClaim>;
+  readAnalysisStartClaim(runId: string): Promise<AnalysisStartClaim>;
+  createAnalysisStartConfirmation(confirmation: AnalysisStartConfirmation): Promise<AnalysisStartConfirmation>;
+  readAnalysisStartConfirmation(runId: string): Promise<AnalysisStartConfirmation>;
   publishSellerListing(listing: ActiveListing): Promise<MarketplaceListing>;
   getListing(listingId: string): Promise<MarketplaceListing>;
   listMarketplaceListings(): Promise<MarketplaceListing[]>;

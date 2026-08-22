@@ -98,6 +98,37 @@ describe("InMemoryMarketplaceRepository", () => {
     })).toThrow(RepositoryDataError);
   });
 
+  it("immutably creates exactly one cloned queued analysis run", async () => {
+    const repository = new InMemoryMarketplaceRepository();
+    const queued = {
+      runId: "analysis-run-immutable",
+      kind: "analysis" as const,
+      status: "queued" as const,
+      media: structuredClone(validDraft.media),
+      photoIds: validDraft.media.map(({ id }) => id),
+      geminiAttempts: 0,
+      gemmaAttempts: 0,
+      createdAt: "2026-08-21T10:00:00.000Z",
+      updatedAt: "2026-08-21T10:00:00.000Z",
+      attempt: 0,
+    };
+    const created = await repository.createAnalysisRun(queued);
+    created.media[0].alt = "Mutated returned media";
+    queued.media[0].alt = "Mutated input media";
+    await expect(repository.createAnalysisRun({
+      ...structuredClone(queued),
+      media: structuredClone(validDraft.media),
+    })).rejects.toBeInstanceOf(RepositoryConflictError);
+    const stored = await repository.readRunSnapshot("analysis", queued.runId);
+    if (stored.kind !== "analysis") throw new Error("Expected analysis run");
+    expect(stored.media).toEqual(validDraft.media);
+    await expect(repository.createAnalysisRun({
+      ...queued,
+      status: "running",
+      startedAt: queued.createdAt,
+    } as never)).rejects.toThrow();
+  });
+
   it("upserts durable run snapshots by deterministic kind and run ID while cloning", async () => {
     const repository = new InMemoryMarketplaceRepository();
     const queued = {
