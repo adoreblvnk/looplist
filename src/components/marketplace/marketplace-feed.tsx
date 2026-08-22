@@ -45,6 +45,7 @@ export function MarketplaceFeed() {
         <div><p className="section-label">Local marketplace</p><h1>Fresh finds, clearly described.</h1></div>
         <p>Pre-owned electronics and footwear grounded in seller photos.</p>
       </section>
+      <BuyerSearch/>
       <section className="browse-listings" aria-labelledby="browse-heading">
         <div className="browse-heading">
           <div><h2 id="browse-heading">Browse listings</h2><p className="result-count">{loading ? "Loading marketplace" : `${shown.length} ${shown.length === 1 ? "listing" : "listings"}`}</p></div>
@@ -68,7 +69,6 @@ export function MarketplaceFeed() {
           </div>
         )}
       </section>
-      <BuyerSearch/>
     </main>
   );
 }
