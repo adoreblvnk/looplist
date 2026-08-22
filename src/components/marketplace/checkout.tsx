@@ -9,6 +9,7 @@ import type { CheckoutSnapshot } from "./types";
 import { displayPrice, humanize } from "./utils";
 import { BASE_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_NETWORK } from "./wallet-config";
 import {
+  PRIMARY_WALLET_CHOICE,
   selectExactPaymentRequirements,
   selectWalletConnector,
   walletApprovalErrorMessage,
@@ -83,7 +84,7 @@ export function Checkout({ listingId }: { listingId: string }) {
       const result = await connectAsync({ connector, chainId: BASE_SEPOLIA_CHAIN_ID });
       if (result.chainId !== BASE_SEPOLIA_CHAIN_ID) {
         await disconnectAsync({ connector });
-        setWalletError("That wallet connected on a different network. Reconnect with Base Account, or switch Coinbase Wallet to Base Sepolia first.");
+        setWalletError("That wallet connected on a different network. Select Base Sepolia in Coinbase Wallet mobile, then scan the QR code again.");
         return;
       }
       setWalletModalOpen(false);
@@ -216,13 +217,9 @@ function WalletChoiceModal({ connectingChoice, error, onChoose, onClose }: {
         </div>
         <p id="wallet-dialog-description">Connect on Base Sepolia to approve the exact test USDC payment.</p>
         <div className="wallet-options">
-          <button ref={primaryOption} className="wallet-option primary" type="button" disabled={connecting} onClick={() => onChoose("baseAccount")}>
+          <button ref={primaryOption} className="wallet-option primary" type="button" disabled={connecting} onClick={() => onChoose(PRIMARY_WALLET_CHOICE)}>
             <span className="wallet-option-mark base-mark" aria-hidden="true">B</span>
-            <span><strong>{connectingChoice === "baseAccount" ? "Opening Base Account…" : "Continue with Base / Coinbase"}</strong><small>Use Base Account with a passkey or Coinbase sign-in. No browser extension required.</small><em>Recommended</em></span>
-          </button>
-          <button className="wallet-option" type="button" disabled={connecting} onClick={() => onChoose("coinbase")}>
-            <span className="wallet-option-mark base-mark" aria-hidden="true">C</span>
-            <span><strong>{connectingChoice === "coinbase" ? "Opening Coinbase Wallet QR…" : "Coinbase Wallet mobile"}</strong><small>Scan a QR code with the Coinbase Wallet mobile app and use its Base Sepolia account.</small></span>
+            <span><strong>{connectingChoice === "coinbase" ? "Opening Coinbase Wallet QR…" : "Continue with Coinbase Wallet"}</strong><small>Scan with Coinbase Wallet mobile on Base Sepolia. No browser extension required.</small><em>Recommended</em></span>
           </button>
           <button className="wallet-option" type="button" disabled={connecting} onClick={() => onChoose("injected")}>
             <span className="wallet-option-mark" aria-hidden="true">↗</span>

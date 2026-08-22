@@ -1,12 +1,13 @@
 import type { PaymentRequirements } from "@x402/core/types";
 import { describe, expect, it } from "vitest";
 import {
-  BASE_ACCOUNT_PREFERENCE,
   BASE_SEPOLIA_CHAIN_ID,
   BASE_SEPOLIA_NETWORK,
+  COINBASE_WALLET_PREFERENCE,
   walletConfig,
 } from "../components/marketplace/wallet-config";
 import {
+  PRIMARY_WALLET_CHOICE,
   selectExactPaymentRequirements,
   selectWalletConnector,
   walletApprovalErrorMessage,
@@ -31,11 +32,11 @@ const expected = {
 };
 
 describe("buyer wallet connection", () => {
-  it("configures Base Sepolia with Base Account, Coinbase mobile, and injected connectors", () => {
-    expect(BASE_ACCOUNT_PREFERENCE).toEqual({ telemetry: false });
+  it("configures Base Sepolia with Coinbase mobile EOA and injected connectors", () => {
+    expect(COINBASE_WALLET_PREFERENCE).toEqual({ options: "eoaOnly" });
+    expect(PRIMARY_WALLET_CHOICE).toBe("coinbase");
     expect(walletConfig.chains.map((chain) => chain.id)).toEqual([BASE_SEPOLIA_CHAIN_ID]);
-    expect(walletConfig.connectors.slice(0, 3).map(({ id, type }) => ({ id, type }))).toEqual([
-      { id: "baseAccount", type: "baseAccount" },
+    expect(walletConfig.connectors.slice(0, 2).map(({ id, type }) => ({ id, type }))).toEqual([
       { id: "coinbaseWalletSDK", type: "coinbaseWallet" },
       { id: "injected", type: "injected" },
     ]);
@@ -43,11 +44,9 @@ describe("buyer wallet connection", () => {
 
   it("selects the requested official connector without falling through to another wallet", () => {
     const connectors = [
-      { id: "baseAccount", type: "baseAccount" },
       { id: "coinbaseWalletSDK", type: "coinbaseWallet" },
       { id: "injected", type: "injected" },
     ];
-    expect(selectWalletConnector(connectors, "baseAccount")?.id).toBe("baseAccount");
     expect(selectWalletConnector(connectors, "coinbase")?.id).toBe("coinbaseWalletSDK");
     expect(selectWalletConnector(connectors, "injected")?.id).toBe("injected");
     expect(selectWalletConnector([], "coinbase")).toBeUndefined();
@@ -58,8 +57,8 @@ describe("buyer wallet connection", () => {
     expect(walletConnectionErrorMessage("injected", new Error("Provider not found"))).toMatch(/install or enable/i);
     expect(walletConnectionErrorMessage("coinbase", new Error("Popup blocked"))).toMatch(/allow pop-ups/i);
     expect(walletConnectionErrorMessage("coinbase", new Error("WebSocket network error"))).toMatch(/check your connection/i);
-    expect(walletConnectionErrorMessage("baseAccount", new Error("This chain is not supported"))).toMatch(/reconnect with Base Account/i);
-    expect(walletApprovalErrorMessage(new Error("Base Sepolia is not supported. Please try a different chain."))).toMatch(/disconnect and reconnect/i);
+    expect(walletConnectionErrorMessage("coinbase", new Error("This chain is not supported"))).toMatch(/select Base Sepolia/i);
+    expect(walletApprovalErrorMessage(new Error("Base Sepolia is not supported. Please try a different chain."))).toMatch(/scan the QR code again/i);
     expect(walletApprovalErrorMessage(new Error("User denied request"))).toMatch(/no payment was authorized/i);
   });
 });
