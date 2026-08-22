@@ -11,7 +11,6 @@ import type { MediaReference } from "../components/marketplace/types";
 const media: MediaReference[] = [
   {
     id: "photo-1",
-    pathname: "media/uploads/session/photo-1.webp",
     mediaType: "image",
     mimeType: "image/webp",
     alt: "Photo 1",

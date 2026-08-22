@@ -1,6 +1,6 @@
 import "server-only";
 import { ZodError } from "zod";
-import { MediaReferenceSchema, type MediaReference } from "../domain/marketplace";
+import { MediaReferenceSchema } from "../domain/marketplace";
 import { uploadedMediaPath } from "../persistence/paths";
 import { createMarketplaceRepository } from "../persistence/production-repository";
 import {
@@ -280,7 +280,9 @@ export function createMediaPostHandler(servicesFactory: () => MediaUploadService
         height,
       });
       await services.repository.createPrivateMedia(media, bytes, services.clock());
-      return json(media satisfies MediaReference, 201);
+      const { pathname: _pathname, ...publicReference } = media;
+      void _pathname;
+      return json(publicReference, 201);
     } catch (cause) {
       if (cause instanceof UploadInputError) return failure(cause.status, cause.code, cause.message);
       if (cause instanceof RepositoryConflictError) return failure(503, "media_unavailable", "Media service is unavailable");

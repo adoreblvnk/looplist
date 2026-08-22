@@ -76,22 +76,24 @@ describe("private seller media upload", () => {
     expect(inspectImage(bytes, mime)).toEqual({ width, height });
   });
 
-  it("writes immutable private media and returns only the analysis MediaReference", async () => {
+  it("writes immutable private media and returns only an opaque public reference", async () => {
     const dependencies = services();
     const response = await createMediaPostHandler(() => dependencies)(request(png(), "image/png; charset=binary"));
     expect(response.status).toBe(201);
     const media = await response.json();
     expect(media).toEqual({
       id: "media_0123456789abcdef",
-      pathname: "media/uploads/media_0123456789abcdef/media_0123456789abcdef.png",
       mediaType: "image",
       mimeType: "image/png",
       alt: "Seller-uploaded product photo",
       width: 640,
       height: 480,
     });
-    expect(JSON.stringify(media)).not.toMatch(/url|token|bytes/i);
-    expect((await dependencies.repository.readPrivateMediaContent(media)).bytes).toEqual(png());
+    expect(JSON.stringify(media)).not.toMatch(/url|token|bytes|pathname|media\/uploads/i);
+    expect((await dependencies.repository.readPrivateMediaContent({
+      ...media,
+      pathname: "media/uploads/media_0123456789abcdef/media_0123456789abcdef.png",
+    })).bytes).toEqual(png());
     const collision = await createMediaPostHandler(() => dependencies)(request(png(), "image/png"));
     expect(collision.status).toBe(503);
   });

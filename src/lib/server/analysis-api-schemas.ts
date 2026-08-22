@@ -1,12 +1,13 @@
 import { z } from "zod";
-import { AnalysisMediaInputSchema, GeminiListingCandidateSchema } from "../analysis/contracts";
+import { GeminiListingCandidateSchema } from "../analysis/contracts";
 import {
   AnalysisRunStateSchema,
   PriceRecommendationSchema,
 } from "../domain/marketplace";
+import { PublicUploadedMediaInputSchema } from "./public-media";
 
 export const AnalysisRunIdSchema = z.string().min(1).max(64).regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/);
-export const AnalyzeRequestSchema = z.object({ media: AnalysisMediaInputSchema }).strict();
+export const AnalyzeRequestSchema = z.object({ media: PublicUploadedMediaInputSchema }).strict();
 export type AnalyzeRequest = z.infer<typeof AnalyzeRequestSchema>;
 
 export const AnalyzeAcceptedSchema = z.object({

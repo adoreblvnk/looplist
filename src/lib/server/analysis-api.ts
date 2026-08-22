@@ -16,6 +16,7 @@ import {
 import { createMarketplaceRepository } from "../persistence/production-repository";
 import { readBoundedJson, RequestJsonError } from "./request-json";
 import { AnalyzeAcceptedSchema, AnalyzeRequestSchema, AnalysisRunIdSchema, toAnalysisRunApiState } from "./analysis-api-schemas";
+import { hydrateUploadedMedia, UploadedMediaValidationError } from "./public-media";
 
 /** 8-128 ASCII unreserved characters; leading character must be alphanumeric. */
 export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._~-]{7,127}$/;
@@ -123,30 +124,31 @@ export function createAnalyzePostHandler(servicesFactory: () => AnalysisApiServi
       const input = AnalyzeRequestSchema.parse(body);
       const services = servicesFactory();
       const runId = await deriveAnalysisRunId(idempotencyKey);
+      const media = await hydrateUploadedMedia(services.repository, input.media);
 
       const existingClaim = await optionalClaim(services.repository, runId);
-      if (existingClaim) return await replayClaim(services, existingClaim, input.media);
+      if (existingClaim) return await replayClaim(services, existingClaim, media);
 
       await services.preflightAnalysis();
       const service = new AnalysisRunService(services.repository, services.clock);
       let run: AnalysisRunState;
       try {
-        run = await service.enqueue(runId, input.media);
+        run = await service.enqueue(runId, media);
       } catch (cause) {
         if (!(cause instanceof AnalysisRunTransitionError)) throw cause;
         run = await service.readSnapshot(runId);
-        if (!sameMedia(run.media, input.media)) {
+        if (!sameMedia(run.media, media)) {
           return error(409, "idempotency_key_reused", "Idempotency key was already used with different media");
         }
       }
 
-      const claim = { runId, media: structuredClone(input.media), claimedAt: services.clock() };
+      const claim = { runId, media: structuredClone(media), claimedAt: services.clock() };
       try {
         await services.repository.createAnalysisStartClaim(claim);
       } catch (cause) {
         if (!(cause instanceof RepositoryConflictError)) throw cause;
         const winner = await services.repository.readAnalysisStartClaim(runId);
-        return await replayClaim(services, winner, input.media);
+        return await replayClaim(services, winner, media);
       }
 
       run = await service.readSnapshot(runId);
@@ -178,11 +180,15 @@ export function createAnalyzePostHandler(servicesFactory: () => AnalysisApiServi
         return error(cause.status === 413 ? 413 : 400, cause.status === 413 ? "request_too_large" : "invalid_request", cause.status === 413 ? "Analysis request is too large" : "Invalid analysis request");
       }
       if (cause instanceof ZodError) return error(400, "invalid_request", "Invalid analysis request");
+      if (cause instanceof UploadedMediaValidationError) return error(400, "invalid_media", "Uploaded media could not be validated");
       if (cause instanceof RepositoryConflictError || cause instanceof AnalysisRunTransitionError) {
         return error(409, "analysis_run_conflict", "Analysis run already exists");
       }
       if (cause instanceof RepositoryDataError) {
         return error(500, "analysis_data_invalid", "Stored analysis data is invalid");
+      }
+      if (cause instanceof RepositoryNotFoundError) {
+        return error(400, "invalid_media", "Uploaded media could not be validated");
       }
       return error(503, "analysis_unavailable", "Analysis service is unavailable");
     }

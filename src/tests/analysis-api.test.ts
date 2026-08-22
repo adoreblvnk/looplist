@@ -13,11 +13,23 @@ import {
 } from "../lib/server/analysis-api";
 import { AnalyzeAcceptedSchema, AnalyzeRequestSchema, AnalysisRunApiStateSchema } from "../lib/server/analysis-api-schemas";
 import { validDraft } from "./domain-fixtures";
+import { uploadedMediaPath } from "../lib/persistence/paths";
 
 vi.mock("server-only", () => ({}));
 
-function media() { return structuredClone(validDraft.media); }
-function services(repository = new InMemoryMarketplaceRepository()): AnalysisApiServices {
+function webp(width = 1600, height = 1200): Uint8Array {
+  const bytes = new Uint8Array(30);
+  bytes.set(new TextEncoder().encode("RIFF"), 0);
+  new DataView(bytes.buffer).setUint32(4, bytes.length - 8, true);
+  bytes.set(new TextEncoder().encode("WEBPVP8 "), 8);
+  new DataView(bytes.buffer).setUint32(16, 10, true);
+  bytes.set([0, 0, 0, 0x9d, 0x01, 0x2a, width & 255, width >> 8, height & 255, height >> 8], 20);
+  return bytes;
+}
+function fullMedia() { return structuredClone(validDraft.media).map((reference) => ({ ...reference, alt: "Seller-uploaded product photo", pathname: uploadedMediaPath(reference.id, reference.id, "webp") })); }
+function media() { return fullMedia().map(({ pathname: _pathname, ...reference }) => { void _pathname; return reference; }); }
+function seededRepository() { return new InMemoryMarketplaceRepository({ media: fullMedia().map((reference) => ({ media: reference, bytes: webp(reference.width, reference.height) })) }); }
+function services(repository = seededRepository()): AnalysisApiServices {
   return {
     repository,
     clock: () => "2026-08-21T10:00:00.000Z",
@@ -51,6 +63,7 @@ function overlapInitialCreates(repository: InMemoryMarketplaceRepository): void 
 describe("strict idempotent analysis API", () => {
   it("exports strict bounded input and exact Idempotency-Key grammar", async () => {
     expect(AnalyzeRequestSchema.safeParse({ media: media(), extra: true }).success).toBe(false);
+    expect(AnalyzeRequestSchema.safeParse({ media: fullMedia() }).success).toBe(false);
     expect(AnalyzeRequestSchema.safeParse({ media: media().slice(0, 2) }).success).toBe(false);
     const duplicate = media(); duplicate[1] = duplicate[0];
     expect(AnalyzeRequestSchema.safeParse({ media: duplicate }).success).toBe(false);
@@ -82,7 +95,7 @@ describe("strict idempotent analysis API", () => {
     expect(dependencies.startAnalysis).toHaveBeenCalledWith(runId);
     expect(await dependencies.repository.readRunSnapshot("analysis", runId)).toMatchObject({ status: "queued" });
     const claim = await dependencies.repository.readAnalysisStartClaim(runId);
-    expect(claim).toEqual({ runId, media: media(), claimedAt: "2026-08-21T10:00:00.000Z" });
+    expect(claim).toEqual({ runId, media: fullMedia(), claimedAt: "2026-08-21T10:00:00.000Z" });
     expect(JSON.stringify(claim)).not.toContain(key);
     expect(await dependencies.repository.readAnalysisStartConfirmation(runId)).toEqual({
       runId,
@@ -100,23 +113,22 @@ describe("strict idempotent analysis API", () => {
     const runId = await deriveAnalysisRunId(key);
     expect((await createAnalyzePostHandler(() => dependencies)(request({ media: media() }, key))).status).toBe(202);
     expect((await createAnalyzePostHandler(() => dependencies)(request({ media: media() }, key))).status).toBe(202);
-    const changed = media(); changed[0].alt = "Different authoritative photo description";
+    const changed = media(); changed[0].width += 1;
     const conflict = await createAnalyzePostHandler(() => dependencies)(request({ media: changed }, key));
-    expect(conflict.status).toBe(409);
-    expect((await body(conflict)).error.code).toBe("idempotency_key_reused");
+    expect(conflict.status).toBe(400);
+    expect((await body(conflict)).error.code).toBe("invalid_media");
     expect(dependencies.startAnalysis).toHaveBeenCalledTimes(1);
     expect(await dependencies.repository.readRunSnapshot("analysis", runId)).toMatchObject({ runId });
   });
 
-  it("binds hostile concurrent first requests to one immutable media winner", async () => {
-    const repository = new InMemoryMarketplaceRepository();
-    overlapInitialCreates(repository);
+  it("rejects hostile concurrent metadata before it can alter the immutable media winner", async () => {
+    const repository = seededRepository();
     const dependencies = services(repository);
     const key = "request-key-hostile-media";
     const runId = await deriveAnalysisRunId(key);
     const left = media();
     const right = media();
-    right[0].alt = "Different authoritative concurrent media";
+    right[0].width += 1;
     const startedBindings: Array<{ run: unknown; claim: unknown }> = [];
     dependencies.startAnalysis = vi.fn(async (startedRunId) => {
       startedBindings.push({
@@ -130,9 +142,9 @@ describe("strict idempotent analysis API", () => {
       createAnalyzePostHandler(() => dependencies)(request({ media: left }, key)),
       createAnalyzePostHandler(() => dependencies)(request({ media: right }, key)),
     ]);
-    expect(responses.map(({ status }) => status).sort()).toEqual([202, 409]);
-    expect((await body(responses.find(({ status }) => status === 409)!)).error.code)
-      .toBe("idempotency_key_reused");
+    expect(responses.map(({ status }) => status).sort()).toEqual([202, 400]);
+    expect((await body(responses.find(({ status }) => status === 400)!)).error.code)
+      .toBe("invalid_media");
     const winner = await repository.readRunSnapshot("analysis", runId);
     const claim = await repository.readAnalysisStartClaim(runId);
     expect(winner.kind).toBe("analysis");
@@ -143,7 +155,7 @@ describe("strict idempotent analysis API", () => {
   });
 
   it("starts exactly once for concurrent first requests with identical media", async () => {
-    const repository = new InMemoryMarketplaceRepository();
+    const repository = seededRepository();
     overlapInitialCreates(repository);
     const dependencies = services(repository);
     const key = "request-key-concurrent-same";
@@ -160,7 +172,7 @@ describe("strict idempotent analysis API", () => {
   });
 
   it("rechecks the immutable run binding after winning the claim and before start", async () => {
-    const repository = new InMemoryMarketplaceRepository();
+    const repository = seededRepository();
     const createClaim = repository.createAnalysisStartClaim.bind(repository);
     repository.createAnalysisStartClaim = async (claim) => {
       const created = await createClaim(claim);
@@ -183,17 +195,17 @@ describe("strict idempotent analysis API", () => {
   });
 
   it("rejects stored claim/run media corruption without accepting or starting", async () => {
-    const repository = new InMemoryMarketplaceRepository();
+    const repository = seededRepository();
     const dependencies = services(repository);
     const key = "request-key-corrupt-binding";
     const runId = await deriveAnalysisRunId(key);
-    const runMedia = media();
+    const runMedia = fullMedia();
     await new AnalysisRunService(repository, dependencies.clock).enqueue(runId, runMedia);
-    const claimMedia = media();
+    const claimMedia = fullMedia();
     claimMedia[0].alt = "Corrupt claim media";
     await repository.createAnalysisStartClaim({ runId, media: claimMedia, claimedAt: dependencies.clock() });
 
-    const response = await createAnalyzePostHandler(() => dependencies)(request({ media: claimMedia }, key));
+    const response = await createAnalyzePostHandler(() => dependencies)(request({ media: media() }, key));
     expect(response.status).toBe(500);
     expect(await body(response)).toEqual({
       error: { code: "analysis_data_invalid", message: "Stored analysis data is invalid" },

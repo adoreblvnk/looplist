@@ -2,7 +2,7 @@
 "use client";
 import { ExactEvmScheme } from "@x402/evm/exact/client";
 import { wrapFetchWithPayment, x402Client } from "@x402/fetch";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useConnect, useConnection, useDisconnect, useSwitchChain, useWalletClient } from "wagmi";
 import type { CheckoutSnapshot } from "./types";
 import { displayPrice, humanize } from "./utils";
@@ -13,10 +13,11 @@ function short(address:string){return `${address.slice(0,6)}…${address.slice(-
 
 export function Checkout({ listingId }: { listingId: string }) {
   const [checkout,setCheckout]=useState<CheckoutSnapshot|null>(null),[loadError,setLoadError]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
+  const pollCount=useRef(0);
   const connection=useConnection(),{connectAsync,connectors}=useConnect(),{disconnect}=useDisconnect(),{switchChainAsync}=useSwitchChain(),{data:walletClient}=useWalletClient({chainId:CHAIN_ID});
   const load=useCallback(async()=>{try{const response=await fetch(`/api/purchases/${encodeURIComponent(listingId)}`,{cache:"no-store"});if(!response.ok)throw 0;setCheckout(await response.json());setLoadError(false)}catch{setLoadError(true)}},[listingId]);
   useEffect(()=>{void load()},[load]);
-  useEffect(()=>{if(checkout?.status!=="settlement_pending")return;const timer=setInterval(()=>void load(),1500);return()=>clearInterval(timer)},[checkout?.status,load]);
+  useEffect(()=>{if(checkout?.status!=="settlement_pending"){pollCount.current=0;return}const timer=setInterval(()=>{pollCount.current+=1;if(pollCount.current>=40){clearInterval(timer);setMessage("Receipt reconciliation is taking longer than expected. Reload to check again.");return}void load()},1500);return()=>clearInterval(timer)},[checkout?.status,load]);
   async function connectWallet(){setMessage("");try{const connector=connectors.find(item=>item.type==="injected")??connectors[0];if(!connector)throw 0;await connectAsync({connector})}catch{setMessage("A compatible browser wallet is required to continue.")}}
   async function approve(){if(!checkout||!connection.address)return;setBusy(true);setMessage("");try{if(connection.chainId!==CHAIN_ID)await switchChainAsync({chainId:CHAIN_ID});if(!walletClient)throw new Error("wallet_not_ready");const expected={amount:checkout.amount.atomicAmount,recipient:checkout.recipientAddress.toLowerCase(),asset:checkout.asset.toLowerCase()};const signer={address:connection.address,signTypedData:async(args:{domain:Record<string,unknown>;types:Record<string,unknown>;primaryType:string;message:Record<string,unknown>})=>walletClient.signTypedData({account:connection.address,...args} as never)};const client=new x402Client().register(NETWORK,new ExactEvmScheme(signer)).setSpendControls({maxAmountPerPayment:false}).registerPolicy((version,requirements)=>version===2?requirements.filter(item=>item.scheme==="exact"&&item.network===NETWORK&&item.amount===expected.amount&&item.payTo.toLowerCase()===expected.recipient&&item.asset.toLowerCase()===expected.asset):[]);const response=await wrapFetchWithPayment(fetch,client)(`/api/purchases/${encodeURIComponent(listingId)}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({buyerAddress:connection.address,approved:true})});const body=await response.json().catch(()=>null);if(!response.ok&&response.status!==202)throw new Error(body?.error?.message??"Payment could not be completed.");setMessage(response.status===202?"Payment confirmed. Preparing your receipt…":"Purchase complete.");await load()}catch(error){setMessage(error instanceof Error&&error.message!=="wallet_not_ready"?error.message:"Wallet authorization was not completed.")}finally{setBusy(false)}}
   async function reconcile(){setBusy(true);try{const response=await fetch(`/api/purchases/${encodeURIComponent(listingId)}/reconcile`,{method:"POST"});if(!response.ok)throw 0;setMessage("Receipt reconciliation restarted.");await load()}catch{setMessage("Receipt reconciliation is still unavailable. Your settlement reference remains preserved.")}finally{setBusy(false)}}
