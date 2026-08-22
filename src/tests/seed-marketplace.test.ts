@@ -6,7 +6,9 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { ActiveListingSchema, SoldComparableSchema } from "../lib/domain/marketplace";
-import { SEED_ACTIVE_LISTINGS, SEED_SOLD_COMPARABLES, SEEDED_SELLERS } from "../lib/persistence/seed-marketplace";
+import { SEED_ACTIVE_LISTINGS, SEED_SOLD_COMPARABLES, SEEDED_SELLERS, seedSoldComparables } from "../lib/persistence/seed-marketplace";
+import { InMemoryMarketplaceRepository } from "../lib/persistence/in-memory-marketplace-repository";
+import { MAX_SOLD_COMPARABLES } from "../lib/persistence/repository";
 import {
   SEED_MEDIA_MANIFEST,
   resolveSeedMedia,
@@ -150,6 +152,24 @@ describe("deterministic marketplace seed corpus", () => {
       expect(listing.approvedDraft.evidence.some(({ kind }) => kind === "condition")).toBe(true);
     }
     expect(prices.size).toBe(10);
+  });
+
+  it("seeds sold comparables only through the immutable repository operation", async () => {
+    const repository = new InMemoryMarketplaceRepository();
+    expect(await repository.listSoldComparables()).toEqual([]);
+    await seedSoldComparables(repository);
+    expect(await repository.listSoldComparables()).toEqual(
+      [...SEED_SOLD_COMPARABLES].sort((left, right) => left.comparableId.localeCompare(right.comparableId))
+    );
+  });
+
+  it("rejects an oversized seed corpus before creating any records", async () => {
+    const repository = new InMemoryMarketplaceRepository();
+    const oversized = Array.from({ length: MAX_SOLD_COMPARABLES + 1 }, (_, index) => ({
+      ...structuredClone(SEED_SOLD_COMPARABLES[0]), comparableId: `seed-bound-${index}`,
+    }));
+    await expect(seedSoldComparables(repository, oversized)).rejects.toThrow();
+    expect(await repository.listSoldComparables()).toEqual([]);
   });
 
   it("has schema-valid sold comparables with multiple relevant records for every shoe demo target", () => {

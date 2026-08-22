@@ -19,6 +19,10 @@ export function publishedListingPath(listingId: string): string {
   return `records/listings/${id(listingId)}/published.json`;
 }
 
+export function soldComparablePath(comparableId: string): string {
+  return `records/comparables/sold/${id(comparableId)}.json`;
+}
+
 export function durableRunPath(kind: DurableRunKind, runId: string): string {
   return `records/runs/${DurableRunKindSchema.parse(kind)}/${id(runId)}.json`;
 }
@@ -62,6 +66,12 @@ export const PublishedListingPathSchema = z
   .regex(
     new RegExp(`^records/listings/${CanonicalPathIdentifierPattern}/published\\.json$`),
     "Invalid immutable published listing path"
+  );
+export const SoldComparablePathSchema = z
+  .string()
+  .regex(
+    new RegExp(`^records/comparables/sold/${CanonicalPathIdentifierPattern}\\.json$`),
+    "Invalid immutable sold comparable path"
   );
 export const DurableRunPathSchema = z
   .string()

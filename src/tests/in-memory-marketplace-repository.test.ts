@@ -8,8 +8,9 @@ import {
   RepositoryConflictError,
   RepositoryDataError,
   RepositoryNotFoundError,
+  MAX_SOLD_COMPARABLES,
 } from "../lib/persistence/repository";
-import { activeListing, reconciliationFailure, settlementReceipt, validDraft } from "./domain-fixtures";
+import { activeListing, comparable, reconciliationFailure, settlementReceipt, validDraft } from "./domain-fixtures";
 
 const seededListing = ActiveListingSchema.parse({
   ...structuredClone(activeListing),
@@ -56,13 +57,57 @@ describe("InMemoryMarketplaceRepository", () => {
     await expect(repository.publishSellerListing(seededListing)).rejects.toThrow();
   });
 
+  it("persists immutable sold comparables with sorted cloned reads and corruption mapping", async () => {
+    const second = { ...structuredClone(comparable), comparableId: "comparable-2" };
+    const repository = new InMemoryMarketplaceRepository();
+    await repository.createSoldComparable(second);
+    const input = structuredClone(comparable);
+    await repository.createSoldComparable(input);
+    input.title = "Caller mutation must not persist";
+    await expect(repository.createSoldComparable(comparable)).rejects.toBeInstanceOf(RepositoryConflictError);
+    const listed = await repository.listSoldComparables();
+    expect(listed.map(({ comparableId }) => comparableId)).toEqual(["comparable-1", "comparable-2"]);
+    listed[0].title = "Read mutation must not persist";
+    expect((await repository.listSoldComparables())[0].title).toBe(comparable.title);
+
+    const malformed = new InMemoryMarketplaceRepository({
+      [IN_MEMORY_REPOSITORY_TEST_HOOK]: [
+        { collection: "comparables", key: comparable.comparableId, value: { ...comparable, extra: true } },
+      ],
+    });
+    await expect(malformed.listSoldComparables()).rejects.toBeInstanceOf(RepositoryDataError);
+
+    const mismatched = new InMemoryMarketplaceRepository({
+      [IN_MEMORY_REPOSITORY_TEST_HOOK]: [
+        { collection: "comparables", key: comparable.comparableId, value: second },
+      ],
+    });
+    await expect(mismatched.listSoldComparables()).rejects.toBeInstanceOf(RepositoryDataError);
+  });
+
+  it("accepts exactly the sold-comparable limit and rejects create and constructor overflow", async () => {
+    const corpus = Array.from({ length: MAX_SOLD_COMPARABLES }, (_, index) => ({
+      ...structuredClone(comparable), comparableId: `bounded-comparable-${index}`,
+    }));
+    const repository = new InMemoryMarketplaceRepository({ soldComparables: corpus });
+    expect(await repository.listSoldComparables()).toHaveLength(MAX_SOLD_COMPARABLES);
+    await expect(repository.createSoldComparable({ ...structuredClone(comparable), comparableId: "overflow" }))
+      .rejects.toBeInstanceOf(RepositoryDataError);
+    expect(() => new InMemoryMarketplaceRepository({
+      soldComparables: [...corpus, { ...structuredClone(comparable), comparableId: "overflow" }],
+    })).toThrow(RepositoryDataError);
+  });
+
   it("upserts durable run snapshots by deterministic kind and run ID while cloning", async () => {
     const repository = new InMemoryMarketplaceRepository();
     const queued = {
       runId: "analysis-run-1",
       kind: "analysis" as const,
       status: "queued" as const,
+      media: structuredClone(validDraft.media),
       photoIds: validDraft.media.map(({ id }) => id),
+      geminiAttempts: 0,
+      gemmaAttempts: 0,
       createdAt: "2026-08-21T10:00:00.000Z",
       updatedAt: "2026-08-21T10:00:00.000Z",
       attempt: 0,
@@ -74,7 +119,14 @@ describe("InMemoryMarketplaceRepository", () => {
     if (reread.kind !== "analysis") throw new Error("Expected analysis run");
     expect(reread.photoIds).toEqual(queued.photoIds);
 
-    await repository.saveRunSnapshot({ ...queued, updatedAt: "2026-08-21T10:01:00.000Z", attempt: 1 });
+    await repository.saveRunSnapshot({
+      ...queued,
+      status: "running",
+      startedAt: "2026-08-21T10:01:00.000Z",
+      updatedAt: "2026-08-21T10:01:00.000Z",
+      attempt: 1,
+      geminiAttempts: 1,
+    });
     expect((await repository.readRunSnapshot("analysis", queued.runId)).attempt).toBe(1);
     await expect(repository.readRunSnapshot("purchase", queued.runId)).rejects.toBeInstanceOf(RepositoryNotFoundError);
   });
@@ -194,7 +246,10 @@ describe("InMemoryMarketplaceRepository", () => {
       runId: "analysis-run-corrupt",
       kind: "analysis" as const,
       status: "queued" as const,
+      media: structuredClone(validDraft.media),
       photoIds: validDraft.media.map(({ id }) => id),
+      geminiAttempts: 0,
+      gemmaAttempts: 0,
       createdAt: "2026-08-21T10:00:00.000Z",
       updatedAt: "2026-08-21T10:00:00.000Z",
       attempt: 0,
@@ -261,7 +316,10 @@ describe("InMemoryMarketplaceRepository", () => {
       runId: "analysis-run-expected",
       kind: "analysis" as const,
       status: "queued" as const,
+      media: structuredClone(validDraft.media),
       photoIds: validDraft.media.map(({ id }) => id),
+      geminiAttempts: 0,
+      gemmaAttempts: 0,
       createdAt: "2026-08-21T10:00:00.000Z",
       updatedAt: "2026-08-21T10:00:00.000Z",
       attempt: 0,

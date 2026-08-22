@@ -13,23 +13,28 @@ import {
   MediaReferenceSchema,
   ReconciliationFailureSchema,
   SettlementReceiptSchema,
+  SoldComparableSchema,
   deterministicPurchaseId,
   type ActiveListing,
   type MediaReference,
   type ReconciliationFailure,
   type SettlementReceipt,
+  type SoldComparable,
 } from "../domain/marketplace";
 import {
   DurableRunPathSchema,
   PublishedListingPathSchema,
+  SoldComparablePathSchema,
   durableRunPath,
   publishedListingPath,
   reconciliationRecordPath,
   settlementReceiptPath,
+  soldComparablePath,
 } from "./paths";
 import {
   DurableRunSnapshotSchema,
   MarketplaceListingSchema,
+  MAX_SOLD_COMPARABLES,
   PrivateMediaContentSchema,
   PrivateMediaMetadataSchema,
   RepositoryConflictError,
@@ -52,6 +57,8 @@ const MAX_LISTING_RECORDS = 500;
 const LISTING_READ_CONCURRENCY = 8;
 const PUBLISHED_LISTING_PREFIX = "records/listings/";
 const PUBLISHED_LISTING_SUFFIX = "/published.json";
+const SOLD_COMPARABLE_PREFIX = "records/comparables/sold/";
+const SOLD_COMPARABLE_SUFFIX = ".json";
 
 const BlobListPageSchema = z.object({
   blobs: z.array(z.unknown()),
@@ -305,6 +312,96 @@ export class VercelBlobMarketplaceRepository implements MarketplaceRepository {
         return this.marketplaceListingForStoredListing(listingId, listing);
       }
     );
+  }
+
+  /**
+   * Capacity enforcement is a single-writer preflight, not CAS: concurrent creators can race
+   * between enumeration and immutable put. Workflows must serialize comparable creation.
+   */
+  async createSoldComparable(candidate: SoldComparable): Promise<SoldComparable> {
+    const comparable = SoldComparableSchema.parse(structuredClone(candidate));
+    const pathname = soldComparablePath(comparable.comparableId);
+    const existingPathnames = await this.listSoldComparablePathnames();
+    if (!existingPathnames.includes(pathname) && existingPathnames.length >= MAX_SOLD_COMPARABLES) {
+      throw new RepositoryDataError("Sold comparable corpus exceeded its record limit");
+    }
+    await this.putJson(pathname, comparable, false);
+    return SoldComparableSchema.parse(structuredClone(comparable));
+  }
+
+  async listSoldComparables(): Promise<SoldComparable[]> {
+    const pathnames = await this.listSoldComparablePathnames();
+    return mapWithConcurrency(
+      pathnames,
+      LISTING_READ_CONCURRENCY,
+      async (pathname) => {
+        const comparableId = pathname.slice(SOLD_COMPARABLE_PREFIX.length, -SOLD_COMPARABLE_SUFFIX.length);
+        const comparable = await this.readJson(pathname, SoldComparableSchema);
+        if (comparable.comparableId !== comparableId) {
+          throw new RepositoryDataError("Stored sold comparable does not match its deterministic path");
+        }
+        return SoldComparableSchema.parse(structuredClone(comparable));
+      }
+    );
+  }
+
+  private async listSoldComparablePathnames(): Promise<string[]> {
+    const pathnames: string[] = [];
+    const seenPathnames = new Set<string>();
+    const seenCursors = new Set<string>();
+    let cursor: string | undefined;
+    let pageCount = 0;
+    do {
+      pageCount += 1;
+      let candidatePage: unknown;
+      try {
+        candidatePage = await this.transport.list({
+          prefix: SOLD_COMPARABLE_PREFIX,
+          limit: 1000,
+          cursor,
+        });
+      } catch (error) {
+        mapProviderError(error);
+      }
+      const parsedPage = BlobListPageSchema.safeParse(candidatePage);
+      if (!parsedPage.success) {
+        throw new RepositoryDataError("Blob comparable provider returned malformed pagination data");
+      }
+      const page = parsedPage.data;
+      for (const blob of page.blobs) {
+        const parsedPath = SoldComparablePathSchema.safeParse(
+          typeof blob === "object" && blob !== null && "pathname" in blob ? blob.pathname : undefined
+        );
+        if (!parsedPath.success || seenPathnames.has(parsedPath.data)) {
+          throw new RepositoryDataError("Blob comparable provider returned a malformed stored path");
+        }
+        seenPathnames.add(parsedPath.data);
+        pathnames.push(parsedPath.data);
+        if (pathnames.length > MAX_SOLD_COMPARABLES) {
+          throw new RepositoryDataError("Blob comparable enumeration exceeded its record limit");
+        }
+      }
+      const parsedCursor = page.cursor === undefined ? undefined : BlobListCursorSchema.safeParse(page.cursor);
+      if (parsedCursor !== undefined && !parsedCursor.success) {
+        throw new RepositoryDataError("Blob comparable provider returned a malformed pagination cursor");
+      }
+      if (!page.hasMore) {
+        cursor = undefined;
+        continue;
+      }
+      if (pageCount >= MAX_LIST_PAGES) {
+        throw new RepositoryDataError("Blob comparable enumeration exceeded its page limit");
+      }
+      if (parsedCursor === undefined) {
+        throw new RepositoryDataError("Blob comparable pagination omitted its cursor");
+      }
+      cursor = parsedCursor.data;
+      if (seenCursors.has(cursor)) {
+        throw new RepositoryDataError("Blob comparable pagination repeated its cursor");
+      }
+      seenCursors.add(cursor);
+    } while (cursor);
+    return pathnames.sort();
   }
 
   async saveRunSnapshot(candidate: DurableRunSnapshot): Promise<DurableRunSnapshot> {

@@ -151,6 +151,18 @@ export const MediaReferenceSchema = z
   });
 export type MediaReference = z.infer<typeof MediaReferenceSchema>;
 
+export function mediaReferencesEqual(left: MediaReference, right: MediaReference): boolean {
+  return (
+    left.id === right.id &&
+    left.pathname === right.pathname &&
+    left.mediaType === right.mediaType &&
+    left.mimeType === right.mimeType &&
+    left.alt === right.alt &&
+    left.width === right.width &&
+    left.height === right.height
+  );
+}
+
 export const PhotoEvidenceSchema = z
   .object({
     id: IdentifierSchema,
@@ -864,30 +876,101 @@ function addRunChronologyIssues(run: DurableRunChronology, context: z.Refinement
   }
 }
 
+export const MAX_ANALYSIS_STAGE_ATTEMPTS = 2;
+export const ANALYSIS_RUN_FAILURES = {
+  gemini: {
+    code: "analysis_listing_generation_failed",
+    message: "Listing analysis failed. Please retry.",
+  },
+  gemma: {
+    code: "analysis_price_recommendation_failed",
+    message: "Price recommendation failed. Please retry.",
+  },
+} as const;
+
+const AnalysisRunSnapshotShape = {
+  media: z.array(MediaReferenceSchema).min(3).max(8),
+  photoIds: z.array(IdentifierSchema).min(3).max(8),
+  geminiAttempts: z.number().int().min(0).max(MAX_ANALYSIS_STAGE_ATTEMPTS),
+  gemmaAttempts: z.number().int().min(0).max(MAX_ANALYSIS_STAGE_ATTEMPTS),
+};
+
 export const AnalysisRunStateSchema = z
   .discriminatedUnion("status", [
-    z.object({ ...RunBaseShape, kind: z.literal("analysis"), status: z.literal("queued"), photoIds: z.array(IdentifierSchema).min(3).max(8) }).strict(),
-    z.object({ ...RunBaseShape, kind: z.literal("analysis"), status: z.literal("running"), photoIds: z.array(IdentifierSchema).min(3).max(8), startedAt: TimestampSchema }).strict(),
-    z.object({ ...RunBaseShape, kind: z.literal("analysis"), status: z.literal("succeeded"), photoIds: z.array(IdentifierSchema).min(3).max(8), startedAt: TimestampSchema, completedAt: TimestampSchema, draft: ListingDraftSchema, priceRecommendation: PriceRecommendationSchema }).strict(),
-    z.object({ ...RunBaseShape, kind: z.literal("analysis"), status: z.literal("failed"), photoIds: z.array(IdentifierSchema).min(3).max(8), startedAt: TimestampSchema.nullable(), failedAt: TimestampSchema, error: RunErrorSchema }).strict(),
+    z.object({ ...RunBaseShape, ...AnalysisRunSnapshotShape, kind: z.literal("analysis"), status: z.literal("queued") }).strict(),
+    z.object({ ...RunBaseShape, ...AnalysisRunSnapshotShape, kind: z.literal("analysis"), status: z.literal("running"), startedAt: TimestampSchema, draft: ListingDraftSchema.optional() }).strict(),
+    z.object({ ...RunBaseShape, ...AnalysisRunSnapshotShape, kind: z.literal("analysis"), status: z.literal("succeeded"), startedAt: TimestampSchema, completedAt: TimestampSchema, draft: ListingDraftSchema, priceRecommendation: PriceRecommendationSchema }).strict(),
+    z.object({ ...RunBaseShape, ...AnalysisRunSnapshotShape, kind: z.literal("analysis"), status: z.literal("failed"), startedAt: TimestampSchema, failedAt: TimestampSchema, draft: ListingDraftSchema.optional(), error: RunErrorSchema }).strict(),
   ])
   .superRefine((run, context) => {
     addRunChronologyIssues(run, context);
+    if (run.attempt !== run.geminiAttempts + run.gemmaAttempts) {
+      context.addIssue({ code: "custom", path: ["attempt"], message: "Analysis attempt must equal the total model attempts" });
+    }
+    if (run.status === "queued" && run.attempt !== 0) {
+      context.addIssue({ code: "custom", path: ["attempt"], message: "Queued analysis cannot have model attempts" });
+    }
     const inputPhotoIds = new Set(run.photoIds);
-    if (inputPhotoIds.size !== run.photoIds.length) {
+    const mediaIds = run.media.map(({ id }) => id);
+    if (inputPhotoIds.size !== run.photoIds.length || new Set(mediaIds).size !== mediaIds.length) {
       context.addIssue({ code: "custom", path: ["photoIds"], message: "Analysis photo IDs must be unique" });
     }
-    if (run.status !== "succeeded") return;
+    if (new Set(run.media.map(({ pathname }) => pathname)).size !== run.media.length) {
+      context.addIssue({ code: "custom", path: ["media"], message: "Analysis media pathnames must be unique" });
+    }
+    if (run.photoIds.length !== mediaIds.length || run.photoIds.some((id, index) => id !== mediaIds[index])) {
+      context.addIssue({ code: "custom", path: ["photoIds"], message: "Analysis photo IDs must exactly match stored media IDs in order" });
+    }
+    const draft =
+      run.status === "succeeded" ? run.draft : run.status === "running" || run.status === "failed" ? run.draft : undefined;
+    if (draft && run.geminiAttempts === 0) {
+      context.addIssue({ code: "custom", path: ["geminiAttempts"], message: "A durable draft requires a Gemini attempt" });
+    }
+    if (run.gemmaAttempts > 0 && !draft) {
+      context.addIssue({ code: "custom", path: ["gemmaAttempts"], message: "Gemma attempts require a durable draft" });
+    }
+    if (run.status === "succeeded" && run.gemmaAttempts === 0) {
+      context.addIssue({ code: "custom", path: ["gemmaAttempts"], message: "Successful analysis requires a Gemma attempt" });
+    }
+    if (run.status === "failed") {
+      const stage = run.draft ? "gemma" : "gemini";
+      const expectedFailure = ANALYSIS_RUN_FAILURES[stage];
+      if (run.error.code !== expectedFailure.code || run.error.message !== expectedFailure.message) {
+        context.addIssue({
+          code: "custom",
+          path: ["error"],
+          message: `Failed analysis must use the sanitized ${stage} failure`,
+        });
+      }
+      if (stage === "gemini" && (
+        run.geminiAttempts !== MAX_ANALYSIS_STAGE_ATTEMPTS || run.gemmaAttempts !== 0
+      )) {
+        context.addIssue({
+          code: "custom",
+          path: ["geminiAttempts"],
+          message: "Listing-generation failure requires exactly two Gemini attempts and no Gemma attempts",
+        });
+      }
+      if (stage === "gemma" && (
+        run.geminiAttempts < 1 || run.gemmaAttempts !== MAX_ANALYSIS_STAGE_ATTEMPTS
+      )) {
+        context.addIssue({
+          code: "custom",
+          path: ["gemmaAttempts"],
+          message: "Price-recommendation failure requires a durable Gemini draft and exactly two Gemma attempts",
+        });
+      }
+    }
+    if (!draft) return;
 
-    const draftMediaIds = new Set(run.draft.media.map(({ id }) => id));
     if (
-      inputPhotoIds.size !== draftMediaIds.size ||
-      [...inputPhotoIds].some((photoId) => !draftMediaIds.has(photoId))
+      run.media.length !== draft.media.length ||
+      run.media.some((reference, index) => !mediaReferencesEqual(reference, draft.media[index]))
     ) {
       context.addIssue({
         code: "custom",
-        path: ["photoIds"],
-        message: "Analysis photo IDs must exactly match the generated draft media IDs",
+        path: ["media"],
+        message: "Analysis draft media must exactly match the stored full media snapshot in order",
       });
     }
   });

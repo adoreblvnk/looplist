@@ -7,6 +7,7 @@ import {
   PurchaseRunStateSchema,
   ReconciliationFailureSchema,
   SettlementReceiptSchema,
+  SoldComparableSchema,
   type ActiveListing,
   type AnalysisRunState,
   type MediaReference,
@@ -14,7 +15,10 @@ import {
   type PurchaseRunState,
   type ReconciliationFailure,
   type SettlementReceipt,
+  type SoldComparable,
 } from "../domain/marketplace";
+
+export const MAX_SOLD_COMPARABLES = 100;
 
 export const DurableRunSnapshotSchema = z.union([
   AnalysisRunStateSchema,
@@ -134,6 +138,12 @@ export interface MarketplaceRepository {
   getListing(listingId: string): Promise<MarketplaceListing>;
   listMarketplaceListings(): Promise<MarketplaceListing[]>;
   /**
+   * Immutable bounded create. Production adapters use a single-writer capacity preflight;
+   * the repository contract does not provide an atomic capacity check or CAS guarantee.
+   */
+  createSoldComparable(comparable: SoldComparable): Promise<SoldComparable>;
+  listSoldComparables(): Promise<SoldComparable[]>;
+  /**
    * Unconditionally replaces the snapshot at the run's deterministic path.
    * This is last-writer-wins persistence, not a monotonic update or CAS guarantee;
    * callers and workflows that can write the same run must serialize their writes.
@@ -156,6 +166,9 @@ export function parseRunSnapshot(value: unknown): DurableRunSnapshot {
 }
 export function parseSettlementReceipt(value: unknown): SettlementReceipt {
   return SettlementReceiptSchema.parse(value);
+}
+export function parseSoldComparable(value: unknown): SoldComparable {
+  return SoldComparableSchema.parse(value);
 }
 export function parseReconciliationFailure(value: unknown): ReconciliationFailure {
   return ReconciliationFailureSchema.parse(value);

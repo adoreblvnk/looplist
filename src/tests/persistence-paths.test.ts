@@ -4,11 +4,13 @@ import {
   PublishedListingPathSchema,
   ReconciliationRecordPathSchema,
   SettlementReceiptPathSchema,
+  SoldComparablePathSchema,
   durableRunPath,
   publishedListingPath,
   reconciliationRecordPath,
   seedMediaPath,
   settlementReceiptPath,
+  soldComparablePath,
   uploadedMediaPath,
 } from "../lib/persistence/paths";
 import { MediaReferenceSchema } from "../lib/domain/marketplace";
@@ -16,6 +18,7 @@ import { MediaReferenceSchema } from "../lib/domain/marketplace";
 describe("private persistence path builders", () => {
   it("builds explicit operation-specific record paths", () => {
     expect(publishedListingPath("listing-1")).toBe("records/listings/listing-1/published.json");
+    expect(soldComparablePath("sold-1")).toBe("records/comparables/sold/sold-1.json");
     expect(durableRunPath("analysis", "run-1")).toBe("records/runs/analysis/run-1.json");
     expect(durableRunPath("publication", "run-2")).toBe("records/runs/publication/run-2.json");
     expect(durableRunPath("purchase", "run-3")).toBe("records/runs/purchase/run-3.json");
@@ -34,15 +37,18 @@ describe("private persistence path builders", () => {
     const max = "a".repeat(64);
     const tooLong = "a".repeat(65);
     expect(PublishedListingPathSchema.safeParse(publishedListingPath(max)).success).toBe(true);
+    expect(SoldComparablePathSchema.safeParse(soldComparablePath(max)).success).toBe(true);
     expect(DurableRunPathSchema.safeParse(durableRunPath("analysis", max)).success).toBe(true);
     expect(SettlementReceiptPathSchema.safeParse(settlementReceiptPath(`purchase:${max}`)).success).toBe(true);
     expect(ReconciliationRecordPathSchema.safeParse(reconciliationRecordPath(`purchase:${max}`, max)).success).toBe(true);
 
     expect(() => publishedListingPath(tooLong)).toThrow();
+    expect(() => soldComparablePath(tooLong)).toThrow();
     expect(() => durableRunPath("analysis", tooLong)).toThrow();
     expect(() => settlementReceiptPath(`purchase:${tooLong}`)).toThrow();
     expect(() => reconciliationRecordPath("purchase:x", tooLong)).toThrow();
     expect(PublishedListingPathSchema.safeParse(`records/listings/${tooLong}/published.json`).success).toBe(false);
+    expect(SoldComparablePathSchema.safeParse(`records/comparables/sold/${tooLong}.json`).success).toBe(false);
     expect(DurableRunPathSchema.safeParse(`records/runs/analysis/${tooLong}.json`).success).toBe(false);
     expect(SettlementReceiptPathSchema.safeParse(`records/settlements/receipts/purchase:${tooLong}.json`).success).toBe(false);
     expect(ReconciliationRecordPathSchema.safeParse(`records/settlements/reconciliation/purchase:x/${tooLong}.json`).success).toBe(false);
@@ -62,6 +68,7 @@ describe("private persistence path builders", () => {
     "two words",
   ])("rejects hostile identifier %j", (hostile) => {
     expect(() => publishedListingPath(hostile)).toThrow();
+    expect(() => soldComparablePath(hostile)).toThrow();
     expect(() => durableRunPath("analysis", hostile)).toThrow();
     expect(() => seedMediaPath(hostile, "photo-1", "jpg")).toThrow();
     expect(() => uploadedMediaPath("session-1", hostile, "jpg")).toThrow();

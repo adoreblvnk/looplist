@@ -4,16 +4,20 @@ import {
   MediaReferenceSchema,
   ReconciliationFailureSchema,
   SettlementReceiptSchema,
+  SoldComparableSchema,
   deterministicPurchaseId,
+  mediaReferencesEqual,
   type ActiveListing,
   type MediaReference,
   type ReconciliationFailure,
   type SettlementReceipt,
+  type SoldComparable,
 } from "../domain/marketplace";
-import { durableRunPath, publishedListingPath, reconciliationRecordPath, settlementReceiptPath } from "./paths";
+import { durableRunPath, publishedListingPath, reconciliationRecordPath, settlementReceiptPath, soldComparablePath } from "./paths";
 import {
   DurableRunSnapshotSchema,
   MarketplaceListingSchema,
+  MAX_SOLD_COMPARABLES,
   PrivateMediaContentSchema,
   RepositoryConflictError,
   RepositoryDataError,
@@ -28,11 +32,12 @@ import {
 
 type SeedMedia = { media: MediaReference; bytes: Uint8Array; uploadedAt?: string };
 
-type StoredCollection = "listings" | "runs" | "receipts" | "reconciliations" | "media";
+type StoredCollection = "listings" | "runs" | "receipts" | "reconciliations" | "comparables" | "media";
 export const IN_MEMORY_REPOSITORY_TEST_HOOK: unique symbol = Symbol("in-memory-repository-test-hook");
 export interface InMemoryMarketplaceRepositoryOptions {
   listings?: ActiveListing[];
   media?: SeedMedia[];
+  soldComparables?: SoldComparable[];
   /** @internal Test-only constructor-time corruption injection; not a production mutation API. */
   [IN_MEMORY_REPOSITORY_TEST_HOOK]?: readonly {
     collection: StoredCollection;
@@ -55,26 +60,18 @@ function parseStored<T>(schema: z.ZodType<T>, value: unknown, message: string): 
   }
 }
 
-function mediaReferencesMatch(left: MediaReference, right: MediaReference): boolean {
-  return (
-    left.id === right.id &&
-    left.pathname === right.pathname &&
-    left.mediaType === right.mediaType &&
-    left.mimeType === right.mimeType &&
-    left.alt === right.alt &&
-    left.width === right.width &&
-    left.height === right.height
-  );
-}
-
 export class InMemoryMarketplaceRepository implements MarketplaceRepository {
   private readonly listings = new Map<string, ActiveListing>();
   private readonly runs = new Map<string, DurableRunSnapshot>();
   private readonly receipts = new Map<string, SettlementReceipt>();
   private readonly reconciliations = new Map<string, ReconciliationFailure>();
+  private readonly comparables = new Map<string, SoldComparable>();
   private readonly media = new Map<string, PrivateMediaContent>();
 
   constructor(options: InMemoryMarketplaceRepositoryOptions = {}) {
+    if ((options.soldComparables?.length ?? 0) > MAX_SOLD_COMPARABLES) {
+      throw new RepositoryDataError("Initial sold comparable corpus exceeded its record limit");
+    }
     for (const candidate of options.listings ?? []) {
       const listing = ActiveListingSchema.parse(cloneRecord(candidate));
       if (this.listings.has(listing.listingId)) {
@@ -98,6 +95,13 @@ export class InMemoryMarketplaceRepository implements MarketplaceRepository {
       });
       this.media.set(media.pathname, cloneRecord(content));
     }
+    for (const candidate of options.soldComparables ?? []) {
+      const comparable = SoldComparableSchema.parse(cloneRecord(candidate));
+      if (this.comparables.has(comparable.comparableId)) {
+        throw new RepositoryConflictError("Duplicate initial sold comparable ID");
+      }
+      this.comparables.set(comparable.comparableId, cloneRecord(comparable));
+    }
     for (const injection of options[IN_MEMORY_REPOSITORY_TEST_HOOK] ?? []) {
       const value = cloneRecord(injection.value);
       switch (injection.collection) {
@@ -105,6 +109,7 @@ export class InMemoryMarketplaceRepository implements MarketplaceRepository {
         case "runs": (this.runs as Map<string, unknown>).set(injection.key, value); break;
         case "receipts": (this.receipts as Map<string, unknown>).set(injection.key, value); break;
         case "reconciliations": (this.reconciliations as Map<string, unknown>).set(injection.key, value); break;
+        case "comparables": (this.comparables as Map<string, unknown>).set(injection.key, value); break;
         case "media": (this.media as Map<string, unknown>).set(injection.key, value); break;
       }
     }
@@ -142,6 +147,36 @@ export class InMemoryMarketplaceRepository implements MarketplaceRepository {
           throw new RepositoryDataError("Stored listing does not match its deterministic path");
         }
         return this.marketplaceRecord(listing);
+      });
+  }
+
+  async createSoldComparable(candidate: SoldComparable): Promise<SoldComparable> {
+    const comparable = SoldComparableSchema.parse(cloneRecord(candidate));
+    soldComparablePath(comparable.comparableId);
+    if (this.comparables.has(comparable.comparableId)) throw new RepositoryConflictError();
+    if (this.comparables.size >= MAX_SOLD_COMPARABLES) {
+      throw new RepositoryDataError("Sold comparable corpus exceeded its record limit");
+    }
+    this.comparables.set(comparable.comparableId, cloneRecord(comparable));
+    return SoldComparableSchema.parse(cloneRecord(comparable));
+  }
+
+  async listSoldComparables(): Promise<SoldComparable[]> {
+    if (this.comparables.size > MAX_SOLD_COMPARABLES) {
+      throw new RepositoryDataError("Sold comparable corpus exceeded its record limit");
+    }
+    return [...this.comparables.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([comparableId, stored]) => {
+        const comparable = parseStored(
+          SoldComparableSchema,
+          stored,
+          "Stored sold comparable failed validation"
+        );
+        if (comparable.comparableId !== comparableId) {
+          throw new RepositoryDataError("Stored sold comparable does not match its deterministic path");
+        }
+        return cloneRecord(comparable);
       });
   }
 
@@ -226,7 +261,7 @@ export class InMemoryMarketplaceRepository implements MarketplaceRepository {
     if (!this.media.has(media.pathname)) throw new RepositoryNotFoundError("Private media was not found");
     const stored = this.media.get(media.pathname);
     const content = parseStored(PrivateMediaContentSchema, stored, "Stored private media failed validation");
-    if (!mediaReferencesMatch(content.metadata.media, media)) {
+    if (!mediaReferencesEqual(content.metadata.media, media)) {
       throw new RepositoryDataError("Stored private media does not match its authoritative reference");
     }
     return cloneRecord(content.metadata);
@@ -237,7 +272,7 @@ export class InMemoryMarketplaceRepository implements MarketplaceRepository {
     if (!this.media.has(media.pathname)) throw new RepositoryNotFoundError("Private media was not found");
     const stored = this.media.get(media.pathname);
     const content = parseStored(PrivateMediaContentSchema, stored, "Stored private media failed validation");
-    if (!mediaReferencesMatch(content.metadata.media, media)) {
+    if (!mediaReferencesEqual(content.metadata.media, media)) {
       throw new RepositoryDataError("Stored private media does not match its authoritative reference");
     }
     return cloneRecord(content);

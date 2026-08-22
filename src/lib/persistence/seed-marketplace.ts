@@ -11,6 +11,7 @@ import {
   type SoldComparable,
 } from "../domain/marketplace";
 import { seedMediaPath } from "./paths";
+import { MAX_SOLD_COMPARABLES, type MarketplaceRepository } from "./repository";
 
 function deepFreeze<T>(value: T): T {
   if (Array.isArray(value)) {
@@ -370,3 +371,14 @@ export const SEED_SOLD_COMPARABLES: readonly SoldComparable[] = deepFreeze(SoldC
   comparable("sold-af1-miami-hook-a", "Nike Air Force 1 Miami Dolphins Double Hook", "sneakers", "Nike", "Air Force 1 Miami Dolphins Double Hook", "very_good", "129000000", "2026-07-19T12:00:00.000Z", 0.98, "Same lifestyle-sneaker variant with matching visible white, orange, and teal color details."),
   comparable("sold-af1-miami-hook-b", "Air Force 1 white double-hook sneakers", "sneakers", "Nike", "Air Force 1 Miami Dolphins Double Hook", "good", "112000000", "2026-08-06T12:00:00.000Z", 0.9, "Same double-hook model and color family with more described wear."),
 ]));
+
+/** Explicit test/dev seeding helper. Production reads never fall back to static fixtures. */
+export async function seedSoldComparables(
+  repository: MarketplaceRepository,
+  comparables: readonly SoldComparable[] = SEED_SOLD_COMPARABLES
+): Promise<void> {
+  const validated = SoldComparableSchema.array().max(MAX_SOLD_COMPARABLES).parse(structuredClone(comparables));
+  for (const comparable of validated) {
+    await repository.createSoldComparable(comparable);
+  }
+}

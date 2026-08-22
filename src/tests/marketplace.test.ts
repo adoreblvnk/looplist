@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ANALYSIS_RUN_FAILURES,
   AnalysisRunStateSchema,
   BuyerSearchResultSchema,
   DEMO_BUYER,
@@ -83,6 +84,10 @@ function succeededAnalysis(photoIds: string[]) {
   return {
     ...runBase,
     kind: "analysis" as const,
+    media: [...validDraft.media, fourthPhoto],
+    geminiAttempts: 1,
+    gemmaAttempts: 1,
+    attempt: 2,
     runId: "analysis-input-binding",
     status: "succeeded" as const,
     photoIds,
@@ -685,6 +690,10 @@ describe("durable AI and publication outputs", () => {
     const succeeded = AnalysisRunStateSchema.parse({
       ...runBase,
       kind: "analysis",
+      media: validDraft.media,
+      geminiAttempts: 1,
+      gemmaAttempts: 1,
+      attempt: 2,
       runId: "analysis-1",
       status: "succeeded",
       photoIds: ["photo-1", "photo-2", "photo-3"],
@@ -696,11 +705,105 @@ describe("durable AI and publication outputs", () => {
     expect(succeeded).toMatchObject({ draft: validDraft, priceRecommendation: recommendation });
   });
 
+  it.each([
+    ["early Gemini failure", { geminiAttempts: 1, attempt: 1 }],
+    ["Gemma attempts without a draft", { gemmaAttempts: 1, attempt: 3 }],
+    ["wrong listing code", { error: ANALYSIS_RUN_FAILURES.gemma }],
+    ["arbitrary listing message", { error: { ...ANALYSIS_RUN_FAILURES.gemini, message: "Another message" } }],
+  ])("rejects %s in a failed analysis without a durable draft", (_case, mutation) => {
+    const failed = {
+      ...runBase,
+      kind: "analysis" as const,
+      runId: "analysis-failed-listing-stage",
+      status: "failed" as const,
+      media: validDraft.media,
+      photoIds: validDraft.media.map(({ id }) => id),
+      geminiAttempts: 2,
+      gemmaAttempts: 0,
+      attempt: 2,
+      startedAt: "2026-08-21T10:00:00.000Z",
+      failedAt: "2026-08-21T10:01:00.000Z",
+      error: ANALYSIS_RUN_FAILURES.gemini,
+    };
+    expect(AnalysisRunStateSchema.safeParse(failed).success).toBe(true);
+    expect(AnalysisRunStateSchema.safeParse({ ...failed, ...mutation }).success).toBe(false);
+  });
+
+  it.each([
+    ["early Gemma failure", { gemmaAttempts: 1, attempt: 2 }],
+    ["no Gemini attempt", { geminiAttempts: 0, attempt: 2 }],
+    ["wrong pricing code", { error: ANALYSIS_RUN_FAILURES.gemini }],
+    ["arbitrary pricing message", { error: { ...ANALYSIS_RUN_FAILURES.gemma, message: "Another message" } }],
+  ])("rejects %s in a failed analysis with a durable draft", (_case, mutation) => {
+    const failed = {
+      ...runBase,
+      kind: "analysis" as const,
+      runId: "analysis-failed-pricing-stage",
+      status: "failed" as const,
+      media: validDraft.media,
+      photoIds: validDraft.media.map(({ id }) => id),
+      geminiAttempts: 1,
+      gemmaAttempts: 2,
+      attempt: 3,
+      startedAt: "2026-08-21T10:00:00.000Z",
+      failedAt: "2026-08-21T10:01:00.000Z",
+      draft: validDraft,
+      error: ANALYSIS_RUN_FAILURES.gemma,
+    };
+    expect(AnalysisRunStateSchema.safeParse(failed).success).toBe(true);
+    expect(AnalysisRunStateSchema.safeParse({ ...failed, ...mutation }).success).toBe(false);
+  });
+
+  it.each([
+    ["pathname", { pathname: "media/uploads/session-2/photo-1.webp" }],
+    ["MIME", { pathname: "media/uploads/session-1/photo-1.png", mimeType: "image/png" }],
+    ["alt", { alt: "Hostile replacement alt text" }],
+    ["width", { width: validDraft.media[0].width + 1 }],
+    ["height", { height: validDraft.media[0].height + 1 }],
+  ])("rejects a draft whose same-ID media changes %s from the durable snapshot", (_case, change) => {
+    const storedMedia = structuredClone(validDraft.media);
+    storedMedia[0] = { ...storedMedia[0], ...change } as typeof storedMedia[number];
+    expect(AnalysisRunStateSchema.safeParse({
+      ...runBase,
+      kind: "analysis",
+      runId: `analysis-hostile-media-${_case}`,
+      status: "succeeded",
+      media: storedMedia,
+      photoIds: storedMedia.map(({ id }) => id),
+      geminiAttempts: 1,
+      gemmaAttempts: 1,
+      attempt: 2,
+      startedAt: "2026-08-21T10:00:00.000Z",
+      completedAt: "2026-08-21T10:01:00.000Z",
+      draft: validDraft,
+      priceRecommendation: recommendation,
+    }).success).toBe(false);
+  });
+
+  it("rejects duplicate durable media pathnames even when IDs differ", () => {
+    const storedMedia = structuredClone(validDraft.media);
+    storedMedia[1] = { ...storedMedia[1], pathname: storedMedia[0].pathname };
+    expect(AnalysisRunStateSchema.safeParse({
+      ...runBase,
+      kind: "analysis",
+      runId: "analysis-duplicate-media-pathname",
+      status: "queued",
+      media: storedMedia,
+      photoIds: storedMedia.map(({ id }) => id),
+      geminiAttempts: 0,
+      gemmaAttempts: 0,
+      attempt: 0,
+    }).success).toBe(false);
+  });
+
   it("rejects successful analysis without a price recommendation", () => {
     expect(
       AnalysisRunStateSchema.safeParse({
         ...runBase,
         kind: "analysis",
+      media: validDraft.media,
+      geminiAttempts: 1,
+      gemmaAttempts: 0,
         runId: "analysis-1",
         status: "succeeded",
         photoIds: ["photo-1", "photo-2", "photo-3"],
@@ -753,6 +856,9 @@ describe("durable AI and publication outputs", () => {
       ...runBase,
       ...fields,
       kind: "analysis",
+      media: validDraft.media,
+      geminiAttempts: 1,
+      gemmaAttempts: 0,
       runId: `analysis-${status}-duplicate-inputs`,
       status,
       photoIds: ["photo-1", "photo-2", "photo-2"],
@@ -831,8 +937,12 @@ describe("durable run chronology", () => {
       AnalysisRunStateSchema.safeParse({
         ...runBase,
         kind: "analysis",
+      media: validDraft.media,
+      geminiAttempts: 0,
+      gemmaAttempts: 0,
         runId: "analysis-queued-chronology",
         status: "queued",
+        attempt: 0,
         photoIds: ["photo-1", "photo-2", "photo-3"],
         updatedAt: "2026-08-21T09:58:59.999Z",
       }).success
@@ -864,6 +974,9 @@ describe("durable run chronology", () => {
         ...runBase,
         ...fields,
         kind: "analysis",
+      media: validDraft.media,
+      geminiAttempts: 1,
+      gemmaAttempts: 0,
         runId: `analysis-${status}-chronology`,
         status,
         photoIds: ["photo-1", "photo-2", "photo-3"],

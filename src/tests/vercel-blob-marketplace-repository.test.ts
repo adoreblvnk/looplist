@@ -9,8 +9,9 @@ import {
   RepositoryDataError,
   RepositoryNotFoundError,
   RepositoryUnavailableError,
+  MAX_SOLD_COMPARABLES,
 } from "../lib/persistence/repository";
-import { activeListing, reconciliationFailure, settlementReceipt, validDraft } from "./domain-fixtures";
+import { activeListing, comparable, reconciliationFailure, settlementReceipt, validDraft } from "./domain-fixtures";
 
 type Stored = { body: string; contentType: string; uploadedAt: Date };
 const UNSET = Symbol("unset");
@@ -109,11 +110,78 @@ describe("VercelBlobMarketplaceRepository", () => {
     expect(transport.stored.get(transport.puts[0].pathname)?.body).not.toContain("BLOB_READ_WRITE_TOKEN");
   });
 
+  it("creates and lists immutable sold comparables with strict path binding and bounds", async () => {
+    const transport = new FakeBlobTransport();
+    const repository = new VercelBlobMarketplaceRepository(transport);
+    await repository.createSoldComparable(comparable);
+    expect(transport.puts[0]).toEqual({
+      pathname: "records/comparables/sold/comparable-1.json",
+      options: { access: "private", addRandomSuffix: false, allowOverwrite: false, contentType: "application/json" },
+    });
+    await expect(repository.createSoldComparable(comparable)).rejects.toBeInstanceOf(RepositoryConflictError);
+    expect(await repository.listSoldComparables()).toEqual([comparable]);
+    expect(transport.listCalls.at(-1)).toMatchObject({ prefix: "records/comparables/sold/", limit: 1000 });
+
+    const exact = new FakeBlobTransport();
+    for (let index = 0; index < MAX_SOLD_COMPARABLES; index += 1) {
+      const record = { ...structuredClone(comparable), comparableId: `bounded-comparable-${index}` };
+      exact.stored.set(`records/comparables/sold/${record.comparableId}.json`, {
+        body: JSON.stringify(record), contentType: "application/json", uploadedAt: new Date(),
+      });
+    }
+    expect(await new VercelBlobMarketplaceRepository(exact).listSoldComparables())
+      .toHaveLength(MAX_SOLD_COMPARABLES);
+
+    const mismatched = new FakeBlobTransport();
+    mismatched.stored.set("records/comparables/sold/comparable-1.json", {
+      body: JSON.stringify({ ...comparable, comparableId: "comparable-2" }),
+      contentType: "application/json",
+      uploadedAt: new Date(),
+    });
+    await expect(
+      new VercelBlobMarketplaceRepository(mismatched).listSoldComparables()
+    ).rejects.toBeInstanceOf(RepositoryDataError);
+
+    const overflow = new FakeBlobTransport();
+    overflow.listResults.push({
+      blobs: Array.from({ length: MAX_SOLD_COMPARABLES + 1 }, (_, index) => ({
+        pathname: `records/comparables/sold/comparable-${index}.json`,
+      })),
+      hasMore: false,
+    });
+    await expect(
+      new VercelBlobMarketplaceRepository(overflow).listSoldComparables()
+    ).rejects.toBeInstanceOf(RepositoryDataError);
+    expect(overflow.gets).toHaveLength(0);
+  });
+
+  it("accepts the 100th comparable and rejects the 101st before Blob put", async () => {
+    const transport = new FakeBlobTransport();
+    for (let index = 0; index < MAX_SOLD_COMPARABLES - 1; index += 1) {
+      const record = { ...structuredClone(comparable), comparableId: `capacity-comparable-${index}` };
+      transport.stored.set(`records/comparables/sold/${record.comparableId}.json`, {
+        body: JSON.stringify(record), contentType: "application/json", uploadedAt: new Date(),
+      });
+    }
+    const repository = new VercelBlobMarketplaceRepository(transport);
+    const hundredth = { ...structuredClone(comparable), comparableId: "capacity-comparable-99" };
+    await expect(repository.createSoldComparable(hundredth)).resolves.toEqual(hundredth);
+    expect(transport.puts).toHaveLength(1);
+    await expect(repository.createSoldComparable(hundredth)).rejects.toBeInstanceOf(RepositoryConflictError);
+    expect(transport.puts).toHaveLength(2);
+
+    const overflowRecord = { ...structuredClone(comparable), comparableId: "capacity-comparable-100" };
+    await expect(repository.createSoldComparable(overflowRecord)).rejects.toBeInstanceOf(RepositoryDataError);
+    expect(transport.puts).toHaveLength(2);
+    expect(transport.stored.has("records/comparables/sold/capacity-comparable-100.json")).toBe(false);
+  });
+
   it("uses overwrite only for durable run snapshots and reads with private origin access", async () => {
     const transport = new FakeBlobTransport();
     const repository = new VercelBlobMarketplaceRepository(transport);
     const run = {
       runId: "analysis-run-1", kind: "analysis" as const, status: "queued" as const,
+      media: structuredClone(validDraft.media), geminiAttempts: 0, gemmaAttempts: 0,
       photoIds: validDraft.media.map(({ id }) => id), createdAt: "2026-08-21T10:00:00.000Z",
       updatedAt: "2026-08-21T10:00:00.000Z", attempt: 0,
     };
