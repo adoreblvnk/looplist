@@ -2,6 +2,8 @@
 
 Event: https://luma.com/deepmind-v4ci
 
+Hackathon track: Most Creative Gemini Hack. Use the stable `gemini-3.6-flash` model highlighted by the event and make its multimodal reasoning visibly central to the demo.
+
 ## Product
 
 LoopList turns item photos into a verified eBay listing. The first category is used consumer electronics and collectibles. The seller approves condition disclosures and price before publication.
@@ -26,6 +28,8 @@ LoopList turns item photos into a verified eBay listing. The first category is u
 - Vercel Blob for images and versioned skill artifacts
 - eBay Sandbox as the listing source of truth
 - Browser local storage only for the workflow ID and disposable UI cache
+- Gemini, Blob, and Workflow are live required paths. Do not implement fixtures, mocks, or automatic fallbacks for them; surface a clear recoverable failure if any required service is unavailable.
+- Until eBay developer approval and Sandbox credentials arrive, the eBay boundary alone uses a deterministic adapter with the same publish, retrieve, verify, and validation-error semantics expected from the Sandbox connector.
 
 ## Experience and visual direction
 
@@ -49,4 +53,4 @@ LoopList turns item photos into a verified eBay listing. The first category is u
 
 The two-minute demo begins at item capture. It uses one preconfigured eBay Sandbox seller and server-side OAuth refresh token. There is no application login, onboarding, billing, buyer messaging, real payment, shipping fulfilment, or Carousell integration.
 
-Provide a seeded item, completed fallback run, published fallback listing, and reset action. Never publish without explicit approval. Show operational trace labels only: Observation, Action, Tool result, Verification, and Skill saved.
+Provide a seeded item, completed eBay-adapter run, published eBay-adapter listing, and reset action. Never publish without explicit approval. Show operational trace labels only: Observation, Action, Tool result, Verification, and Skill saved.
