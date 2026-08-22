@@ -1,15 +1,10 @@
 "use client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createConfig, http, injected, WagmiProvider } from "wagmi";
-import { baseSepolia } from "wagmi/chains";
+import { WagmiProvider } from "wagmi";
 import { useState } from "react";
+import { walletConfig } from "./wallet-config";
 
-export const walletConfig = createConfig({
-  chains: [baseSepolia],
-  connectors: [injected()],
-  transports: { [baseSepolia.id]: http("https://sepolia.base.org") },
-  ssr: true,
-});
+export { walletConfig } from "./wallet-config";
 
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
