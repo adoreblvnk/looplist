@@ -45,3 +45,19 @@ export interface BuyerSearchResponse {
   };
   matches: BuyerSearchMatch[];
 }
+
+export interface Receipt {
+  receiptId:string; purchaseId:string; listingId:string; listingTitle:string;
+  buyer:{id:"demo-buyer";displayName:"Alex Rivera";role:"buyer";fictional:true};
+  seller:{id:string;displayName:string;role:"seller";fictional:true};
+  buyerAddress:string; recipientAddress:string; amount:Money;
+  x402PaymentReference:string; settlementTransaction:string; settledAt:string; status:"sold";
+}
+export interface CheckoutSnapshot {
+  listingId:string;title:string;condition:Condition;conditionSummary:string;amount:Money;
+  recipientAddress:string;network:"eip155:84532";chainId:84532;
+  asset:"0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+  reservationExpiresAt:string|null;
+  status:"active"|"payment_pending"|"settlement_pending"|"reconciliation_failed"|"sold";
+  receipt:Receipt|null;
+}

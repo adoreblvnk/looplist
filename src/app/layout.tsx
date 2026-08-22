@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { MarketplaceHeader } from "@/components/marketplace/marketplace-header";
+import { WalletProvider } from "@/components/marketplace/wallet-provider";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -16,8 +17,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body>
         <a className="skip-link" href="#main-content">Skip to main content</a>
-        <MarketplaceHeader />
-        {children}
+        <WalletProvider>
+          <MarketplaceHeader />
+          {children}
+        </WalletProvider>
       </body>
     </html>
   );

@@ -42,6 +42,7 @@ import {
   type PrivateMediaMetadata,
   type PublicationRequestRecord,
   type QueuedAnalysisRun,
+  type QueuedPurchaseRun,
 } from "./repository";
 
 type SeedMedia = { media: MediaReference; bytes: Uint8Array; uploadedAt?: string };
@@ -143,6 +144,17 @@ export class InMemoryMarketplaceRepository implements MarketplaceRepository {
     if (this.runs.has(key)) throw new RepositoryConflictError();
     this.runs.set(key, cloneRecord(run));
     return DurableRunSnapshotSchema.parse(cloneRecord(run)) as QueuedAnalysisRun;
+  }
+
+  async createPurchaseRun(candidate: QueuedPurchaseRun): Promise<QueuedPurchaseRun> {
+    const run = DurableRunSnapshotSchema.parse(cloneRecord(candidate));
+    if (run.kind !== "purchase" || run.status !== "queued") {
+      throw new TypeError("createPurchaseRun accepts queued purchase runs only");
+    }
+    const key = `purchase:${run.runId}`;
+    if (this.runs.has(key)) throw new RepositoryConflictError();
+    this.runs.set(key, cloneRecord(run));
+    return DurableRunSnapshotSchema.parse(cloneRecord(run)) as QueuedPurchaseRun;
   }
 
   async createAnalysisStartClaim(candidate: AnalysisStartClaim): Promise<AnalysisStartClaim> {

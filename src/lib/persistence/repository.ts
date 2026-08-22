@@ -35,6 +35,7 @@ export const DurableRunSnapshotSchema = z.union([
 ]);
 export type DurableRunSnapshot = z.infer<typeof DurableRunSnapshotSchema>;
 export type QueuedAnalysisRun = Extract<AnalysisRunState, { status: "queued" }>;
+export type QueuedPurchaseRun = Extract<PurchaseRunState, { status: "queued" }>;
 
 export const PublicationRequestRecordSchema = z.object({
   runId: z.string().min(1).max(64).regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/),
@@ -180,6 +181,8 @@ export interface MarketplaceRepository {
    * Later sole-writer transitions use saveRunSnapshot; no general CAS is provided.
    */
   createAnalysisRun(run: QueuedAnalysisRun): Promise<QueuedAnalysisRun>;
+  /** Immutable create-winner for a listing's sole purchase workflow. This is not CAS. */
+  createPurchaseRun(run: QueuedPurchaseRun): Promise<QueuedPurchaseRun>;
   createAnalysisStartClaim(claim: AnalysisStartClaim): Promise<AnalysisStartClaim>;
   readAnalysisStartClaim(runId: string): Promise<AnalysisStartClaim>;
   createAnalysisStartConfirmation(confirmation: AnalysisStartConfirmation): Promise<AnalysisStartConfirmation>;

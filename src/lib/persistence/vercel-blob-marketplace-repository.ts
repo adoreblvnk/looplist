@@ -65,6 +65,7 @@ import {
   type PrivateMediaMetadata,
   type PublicationRequestRecord,
   type QueuedAnalysisRun,
+  type QueuedPurchaseRun,
 } from "./repository";
 
 const MAX_JSON_BYTES = 512 * 1024;
@@ -249,6 +250,15 @@ export class VercelBlobMarketplaceRepository implements MarketplaceRepository {
     }
     await this.putJson(durableRunPath("analysis", run.runId), run, false);
     return DurableRunSnapshotSchema.parse(structuredClone(run)) as QueuedAnalysisRun;
+  }
+
+  async createPurchaseRun(candidate: QueuedPurchaseRun): Promise<QueuedPurchaseRun> {
+    const run = DurableRunSnapshotSchema.parse(structuredClone(candidate));
+    if (run.kind !== "purchase" || run.status !== "queued") {
+      throw new TypeError("createPurchaseRun accepts queued purchase runs only");
+    }
+    await this.putJson(durableRunPath("purchase", run.runId), run, false);
+    return DurableRunSnapshotSchema.parse(structuredClone(run)) as QueuedPurchaseRun;
   }
 
   async createAnalysisStartClaim(candidate: AnalysisStartClaim): Promise<AnalysisStartClaim> {
